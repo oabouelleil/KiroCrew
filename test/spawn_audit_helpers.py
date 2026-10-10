@@ -1160,6 +1160,10 @@ BENIGN_PACKAGE_SPAWNS: frozenset[str] = frozenset(
         "pod/provision.py::_resolve_oid",
         "pod/provision.py::_manifest_path",
         "pod/runtime.py::_git_worktrees",
+        # jj twin of _git_worktrees (the nested `run` in _jj_workspaces): fixed
+        # `jj workspace list` / `jj workspace root` against the same repo hint or
+        # invoking cwd, read-only, not agent-influenced.
+        "pod/runtime.py::run",
         "pod/runtime.py::_run",
         "pod/runtime.py::recent_journal",
         # `kirocrew pod exec` on Windows. POSIX execs the pod's own kirocrew in

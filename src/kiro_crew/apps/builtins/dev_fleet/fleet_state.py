@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from kiro_crew.apps.builtins.dev_fleet import git_facts, live, repository, runtime
+from kiro_crew.apps.builtins.dev_fleet import git_facts, jj_workspaces, live, repository, runtime
 from kiro_crew.executors import subprocess_executor
 from kiro_crew.loop_lock import LoopBoundLock
 from kiro_crew.platform_compat import is_link_or_junction
@@ -174,8 +174,19 @@ async def _head_contained_in_pr(path: str, branch_oid: str, pr_head_oid: str) ->
     """
     if branch_oid.strip() == pr_head_oid.strip():
         return True
+    # Ancestry is a question about the shared object store, which a jj workspace
+    # (no .git of its own) reaches through the colocated main checkout.
+    git_dir = repository._repo() if jj_workspaces.is_workspace(path) else path
     rc, _, _err = await runtime._run_cmd(
-        ["git", "-C", path, "merge-base", "--is-ancestor", branch_oid.strip(), pr_head_oid.strip()],
+        [
+            "git",
+            "-C",
+            git_dir,
+            "merge-base",
+            "--is-ancestor",
+            branch_oid.strip(),
+            pr_head_oid.strip(),
+        ],
         timeout=10,
     )
     return rc == 0
@@ -537,8 +548,13 @@ async def _build_context(
     subjects: list[str] = []
     bodies: list[str] = []
     hit = _CTX_LOG_CACHE.get(path)
-    if facts_key is not None and hit is not None and hit[0] == facts_key:
-        log: str | None = hit[1]
+    if jj_workspaces.is_workspace(path):
+        own = await jj_workspaces.recent_commits(path, remote, repository.BASE_BRANCH, 10)
+        subjects = [c["subject"] for c in own if c["subject"]]
+        bodies = [c["body"] for c in own if c["body"]]
+        log: str | None = None
+    elif facts_key is not None and hit is not None and hit[0] == facts_key:
+        log = hit[1]
     else:
         # Subject + body of the last ~10 non-merge commits, record-separated by
         # 0x1e (bodies contain newlines, so newline can't delimit records).
@@ -1264,7 +1280,7 @@ async def _build_fleet() -> dict:
         # Cached on a stat-only key: a poll with nothing changed runs no git here.
         g, facts_key = await git_facts._git_facts(path)
         pr = (await _pr_status_cached(branch, g.get("head_oid"))) if branch else None
-        name = Path(path).name if not is_main else repository.BASE_BRANCH
+        name = repository.worktree_name(path, is_main)
 
         # Pod status (best-effort)
         running = False
@@ -1541,7 +1557,12 @@ async def _worktree_detail(name: str) -> dict:
 
     remote = await repository._upstream_remote()
     commits: list[dict] = []
-    if not is_main:
+    if not is_main and jj_workspaces.is_workspace(path):
+        commits = [
+            {"hash": c["hash"], "subject": runtime._redact(c["subject"]), "when": c["when"]}
+            for c in await jj_workspaces.recent_commits(path, remote, repository.BASE_BRANCH, 12)
+        ]
+    elif not is_main:
         log = await repository._git(
             path,
             "log",
@@ -1559,13 +1580,16 @@ async def _worktree_detail(name: str) -> dict:
 
     design_docs: list[str] = []
     if not is_main:
-        diff_out = await repository._git(
-            path,
-            "diff",
-            "--name-only",
-            f"{remote}/{repository.BASE_BRANCH}...HEAD",
-            timeout=15,
-        )
+        if jj_workspaces.is_workspace(path):
+            diff_out = await jj_workspaces.changed_files(path, remote, repository.BASE_BRANCH)
+        else:
+            diff_out = await repository._git(
+                path,
+                "diff",
+                "--name-only",
+                f"{remote}/{repository.BASE_BRANCH}...HEAD",
+                timeout=15,
+            )
         if diff_out:
             seen: set[str] = set()
             for line in diff_out.splitlines():
@@ -1714,7 +1738,7 @@ async def _disk() -> dict:
             total = 0
             measured = False
             for w in await repository._discover_worktrees():
-                nm = Path(w["path"]).name
+                nm = repository.worktree_name(w["path"])
                 mb = await _measure_dir_mb(w["path"], timeout=60)
                 if mb is None:
                     continue
