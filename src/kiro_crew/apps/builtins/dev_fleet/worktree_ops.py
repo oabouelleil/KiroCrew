@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from kiro_crew import dep_sync, frontend, hooks, platform_compat
-from kiro_crew.apps.builtins.dev_fleet import fleet_state, live, npm_preflight, repository, runtime
+from kiro_crew.apps.builtins.dev_fleet import (
+    fleet_state,
+    jj_workspaces,
+    live,
+    npm_preflight,
+    repository,
+    runtime,
+)
 from kiro_crew.executors import subprocess_executor
 from kiro_crew.git_config_hooks import ConfigHookScanError
 from kiro_crew.loop_lock import LoopBoundLock
@@ -820,7 +827,7 @@ async def _worktree_remove_locked(
                 + detail,
             }
 
-    _rm_head_oid = (await repository._git(path, "rev-parse", "HEAD")) if branch else None
+    _rm_head_oid = (await repository._head_oid(path)) if branch else None
     pr = (await fleet_state._pr_status_cached(branch, _rm_head_oid)) if branch else None
     own = await repository._own_commits_count(path)
 
@@ -912,9 +919,7 @@ async def _worktree_remove_locked(
     # Hoisted before the fresh-MERGED gate so containment uses the SAME pinned
     # OID (closing a two-reads inconsistency where the first could fail while
     # the second succeeds on retry).
-    verdict_oid = (
-        (await repository._git(repo, "rev-parse", f"refs/heads/{branch}")) if branch else None
-    )
+    verdict_oid = (await repository._branch_oid(path, repo, branch)) if branch else None
     if branch and branch != repository.BASE_BRANCH and not verdict_oid:
         runtime.logger.info(
             "worktree_removal_audit: worktree=%s branch=%s caller=%s force=%s "
@@ -1507,11 +1512,15 @@ async def _worktree_remove_locked(
             # still writing. _run_uninterruptible holds this frame -- and the
             # locks -- until the timeout-bounded `git worktree remove` has
             # finished, then lets the cancellation propagate at that safe point.
-            rc, stdout, stderr = await runtime._run_uninterruptible(
-                runtime._run_cmd(
+            if jj_workspaces.is_workspace(path):
+                removal = jj_workspaces.remove(
+                    repo, path, allow_dirty=force_use_git_force, pre_spawn=_lease_gate
+                )
+            else:
+                removal = runtime._run_cmd(
                     cmd, timeout=_GIT_WORKTREE_REMOVE_TIMEOUT_SECS, pre_spawn=_lease_gate
                 )
-            )
+            rc, stdout, stderr = await runtime._run_uninterruptible(removal)
             if rc != 0:
                 # The pre-spawn lease gate refused: git never ran, so this is not
                 # a git failure and must not be read as "dirty at removal". With
@@ -1611,14 +1620,7 @@ async def _worktree_remove_locked(
                     # lands on the recoverable side (a dangling refs/heads/<branch>,
                     # per the fail-closed policy above), never on a torn write.
                     await runtime._run_uninterruptible(
-                        repository._git(
-                            repo,
-                            "update-ref",
-                            "-d",
-                            f"refs/heads/{branch}",
-                            verdict_oid.strip(),
-                            timeout=10,
-                        )
+                        repository._delete_branch(path, repo, branch, verdict_oid.strip())
                     )
 
         # Every removal path lands here — the single-worktree handler, each parallel
@@ -2358,7 +2360,10 @@ async def _rebase(name: str) -> dict:
 
 async def _rebase_locked(target: dict) -> dict:
     path = target["path"]
-    st = await repository._git(path, "status", "--porcelain")
+    # jj carries working-copy edits through a rebase and undoes a conflicted one
+    # as a whole, so a dirty workspace is not a hazard the way a dirty checkout is.
+    is_jj = jj_workspaces.is_workspace(path)
+    st = "" if is_jj else await repository._git(path, "status", "--porcelain")
     if st is None:
         return {"ok": False, "error": "cannot verify worktree state (git status failed)"}
     if st:
@@ -2406,6 +2411,8 @@ async def _rebase_locked(target: dict) -> dict:
     # worktree onto a base the positive verdict never checked. Base and remote are one
     # snapshot; the fetch and the rebase use its remote.
     remote = base_remote
+    if is_jj:
+        return await jj_workspaces.rebase(path, remote, base_branch)
     if await repository._git(path, "fetch", remote, base_branch, timeout=90) is None:
         return {"ok": False, "error": f"git fetch {remote} {base_branch} failed"}
     rc, stdout, stderr = await runtime._run_cmd(
@@ -2494,7 +2501,7 @@ async def _prunable(path: str, branch: str | None) -> dict:
     """
     # Resolve the full HEAD once so cache invalidation cannot alias distinct
     # commits that share an abbreviated prefix. Reuse it for the merge guard.
-    head_oid = (await repository._git(path, "rev-parse", "HEAD")) if branch else None
+    head_oid = (await repository._head_oid(path)) if branch else None
     pr = (await fleet_state._pr_status_cached(branch, head_oid)) if branch else None
     own = await repository._own_commits_count(path)
     dirty = await repository._real_dirty(path)
@@ -2611,7 +2618,7 @@ async def _prune_candidates() -> dict:
 
     candidates, kept = [], []
     for w, v in verdicts:
-        name = Path(w["path"]).name
+        name = repository.worktree_name(w["path"])
         row = {"name": name, "code": v["code"], "branch": w.get("branch")}
         if v["ok"]:
             # A closed-PR candidate carries the ancestry warning so the

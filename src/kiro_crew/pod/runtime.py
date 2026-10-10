@@ -388,13 +388,41 @@ def _git_worktrees(ref: Path) -> dict[str, Path]:
     return out
 
 
+def _jj_workspaces(ref: Path) -> dict[str, Path]:
+    """Map ``{workspace name | basename | abspath -> root}`` for every jj workspace of
+    the repo *ref* belongs to. Empty when jj is absent or *ref* is not a jj repo.
+    A jj workspace has no ``.git``, so ``git worktree list`` never lists it.
+    """
+
+    def run(*args: str) -> str | None:
+        try:
+            cp = subprocess.run(
+                ["jj", "--no-pager", "--color", "never", "--ignore-working-copy", "-R", str(ref)]
+                + list(args),
+                capture_output=True,
+                timeout=10,
+                **UTF8_TEXT,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return cp.stdout.strip() if cp.returncode == 0 else None
+
+    out: dict[str, Path] = {}
+    for ws in (run("workspace", "list", "-T", 'name ++ "\\n"') or "").splitlines():
+        root = run("workspace", "root", "--name", ws) if ws and not ws.startswith("-") else None
+        if root:
+            for key in (ws, Path(root).name, root):
+                out.setdefault(key, Path(root))
+    return out
+
+
 def resolve_checkout(
     cfg: PodConfig, name: str, *, cwd: Path | None = None, use_pin: bool = True
 ) -> Path:
     """Resolve a friendly worktree *name* to an absolute checkout path.
 
-    Order: pinned ``CHECKOUT=`` (if the dir still exists) → ``git worktree list``
-    (from ``KIROCREW_POD_REPO`` else *cwd*), matching a worktree's basename, then
+    Order: pinned ``CHECKOUT=`` (if the dir still exists) → ``git worktree list`` and
+    ``jj workspace list`` (from ``KIROCREW_POD_REPO`` else *cwd*), matching a worktree's basename, then
     its branch (``name`` or ``feat/<name>``), then an exact path → optional
     ``KIROCREW_POD_WORKTREES_ROOT/name`` fallback → :class:`PodError`.
     """
@@ -408,7 +436,7 @@ def resolve_checkout(
 
     # 2. Ask git. `ref` is the repo hint or the invoking working directory.
     ref = cfg.repo_hint or (cwd or Path.cwd())
-    wts = _git_worktrees(ref)
+    wts = {**_jj_workspaces(ref), **_git_worktrees(ref)}
     hit = wts.get(name) or wts.get(f"feat/{name}")
     if hit is not None:
         return hit

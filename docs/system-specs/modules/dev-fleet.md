@@ -15,7 +15,9 @@ Gateway session auth (token/cookie) gates the proxy entrance as with all builtin
 
 1. **Worktree discovery** — enumerates git worktrees via `git worktree list --porcelain`,
    dropping records git flags `prunable` (checkout directory deleted without a
-   `git worktree prune`); the primary checkout is never dropped, since it anchors `is_main`
+   `git worktree prune`); the primary checkout is never dropped, since it anchors `is_main`.
+   When the main checkout is also a jj repo, its secondary jj workspaces are appended
+   (see *Jujutsu (jj) workspaces*)
 2. **Pod integration** — spin up/down/restart isolated pod instances per worktree
 3. **Pull+Build sync** — pull the resolved base branch and rebuild (venv + frontend dist)
 4. **Prune** — safely remove merged/empty worktrees with PR-shipped verification
@@ -35,6 +37,9 @@ behind that facade is split by state and lifecycle ownership:
   subprocesses, and shutdown admission.
 - `repository.py` owns `MAIN_REPO`, repository discovery and validation, git/worktree
   access, and dirty-state inspection.
+- `jj_workspaces.py` owns everything jj: workspace discovery and the jj half of the
+  per-worktree facts, rebase, and removal. It depends only on `runtime`;
+  `repository` and `worktree_ops` dispatch to it.
 - `live.py` owns live-target discovery, gateway restart backends, the Make Live lock and
   committed-cutover latch, and rollback.
 - `fleet_state.py` owns PR/context/resource caches, fleet projections and tombstones, and
@@ -201,6 +206,63 @@ far as a checkout.
 When a checkout WAS named and git cannot read it, the error names the mechanism that
 supplied the path (`_repo_source_hint`) — the remedy is to edit that one, and listing both
 leaves the user guessing which they set.
+
+## Jujutsu (jj) workspaces
+
+A jj workspace is a Dev Fleet row exactly like a git worktree, and the two can sit in one
+fleet. The routes, prune rules, removal matrix and pod verbs are unchanged; only the
+per-worktree VCS calls differ. A secondary jj workspace has `.jj` and no `.git`, so those
+calls cannot be answered by git.
+
+**Requirement: the main checkout is colocated** (`jj git init --colocate`). Main-checkout
+discovery, base-branch resolution, `gh` lookups and ancestry checks stay on git against
+that checkout, and they hold for jj commits because a jj commit is a git commit in the
+shared store. Discovery looks for `<main>/.jj`; a plain git checkout never spawns jj.
+
+**`jj` is resolved like `gh`**: `_trusted_bin` refuses anything under `$HOME`, which is
+where jj is normally installed, so the operator sets `KIROCREW_DEVFLEET_BIN_JJ` to an
+absolute path in the gateway's service environment. Without it jj workspaces are absent
+from the fleet and the reason is logged once; git worktrees are unaffected. jj keeps repo
+and workspace config under the operator's config dir (`jj config path --repo`), not in the
+checkout, so no repo-controlled setting can name a program for jj to run.
+
+How the fleet's git vocabulary maps (`jj_workspaces.py` is the only place that knows):
+
+| Fleet fact | jj source |
+|---|---|
+| row name | the jj workspace name, which need not match the directory (`repository.worktree_name`); a git worktree keeps its directory name |
+| branch | newest local bookmark at or behind `@` |
+| head / `head_oid` | that bookmark's commit, else `@` (the working copy is snapshotted into `@`, so the head already contains the edits) |
+| dirty | `@` has changes no bookmark covers; checked after a snapshot |
+| untracked files | none: jj tracks every non-ignored file, so `_dirty_split` returns `[]` and a discard is never offered |
+| ahead / own commits | non-empty commits in `<base>@<remote>..<head>`; uncommitted edits are not commits |
+| behind | commits of `<base>@<remote>` not reachable from `@` |
+
+Behaviour that differs from git, and why:
+
+- **Refs are imported, not read.** A bookmark made inside a secondary workspace is not
+  exported to git refs until something runs in the colocated checkout, and a plain
+  `git fetch` there is not seen by the workspaces. Discovery therefore runs
+  `jj git import` first, and the removal pin (`_branch_oid`) asks jj for the bookmark
+  rather than `git rev-parse refs/heads/<branch>`.
+- **Rebase** fetches the base with `jj git fetch`, runs `jj rebase -b @`, and treats any
+  commit conflict in the result as the conflict case. jj records conflicts instead of
+  stopping, so the abort is `jj op restore` to the operation taken just before the
+  rebase, run with the working copy attached so the files rewind with it. A dirty
+  workspace is not refused: jj carries `@` through the rebase.
+- **Removal** is `jj workspace forget` plus deleting the directory, under the same
+  lease gate, worktree lock and `_GIT_MUTATION_LOCK` as git removal. `forget` does not
+  look at files, so the dirty check git does for free is repeated immediately before it.
+  The directory is deleted only while it is still a non-symlink jj workspace root.
+  Nothing is unrecoverable: the snapshot and the commits stay in the operation log.
+- **Branch deletion** after a merged removal is `jj bookmark forget` (local only, so the
+  next push does not schedule a remote deletion). jj has no compare-and-swap, so the
+  pinned OID is re-read immediately before the forget, under the mutation lock.
+- **Pods** resolve a jj workspace by name (`kirocrew pod`'s `resolve_checkout` merges
+  `jj workspace list` with `git worktree list`); the pod's pinned checkout is unchanged.
+
+Not covered: a jj-only repository with no `.git` at the main checkout (the checkout marker
+test requires `.git`).
 
 ## Routes
 

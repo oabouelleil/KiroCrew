@@ -7,7 +7,6 @@ import hmac as _hmac_mod
 import json
 import os
 import time
-from pathlib import Path
 
 from aiohttp import web
 
@@ -385,8 +384,8 @@ async def api_dev_fleet_prune_run(request: web.Request) -> web.Response:
                 },
                 status=503,
             )
-        live_name = Path(live_path).name if live_path else None
-        staged_name = Path(staged_path).name if staged_path else None
+        live_name = repository.worktree_name(live_path) if live_path else None
+        staged_name = repository.worktree_name(staged_path) if staged_path else None
         guarded: set[str] = set()
         for nm in overrides:
             wt, _ = await repository._find_worktree(nm)

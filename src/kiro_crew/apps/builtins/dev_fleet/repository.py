@@ -12,7 +12,7 @@ import stat
 import subprocess
 from pathlib import Path, PurePosixPath
 
-from kiro_crew.apps.builtins.dev_fleet import runtime
+from kiro_crew.apps.builtins.dev_fleet import jj_workspaces, runtime
 from kiro_crew.atomic_write import read_json_or
 from kiro_crew.executors import subprocess_executor
 
@@ -1316,6 +1316,8 @@ async def _worktree_porcelain_entries() -> list[dict]:
     # repository discovery hint).
     for i, e in enumerate(entries):
         e["is_main"] = i == 0
+    # jj workspaces of a colocated checkout are invisible to `git worktree list`.
+    entries.extend({**w, "is_main": False} for w in await jj_workspaces.list_workspaces(repo))
     return entries
 
 
@@ -1341,6 +1343,8 @@ async def _git(git_dir: str, *args: str, timeout: int = 6, mode: str = "standard
 
 
 async def _git_info(path: str) -> dict:
+    if jj_workspaces.is_workspace(path):
+        return await jj_workspaces.info(path, await _upstream_remote(), BASE_BRANCH)
     info: dict = {
         "branch": None,
         "head": None,
@@ -1370,6 +1374,8 @@ async def _git_info(path: str) -> dict:
 async def _git_ahead(path: str) -> int | None:
     """Patch-unique local commits via git cherry."""
     remote = await _upstream_remote()
+    if jj_workspaces.is_workspace(path):
+        return await jj_workspaces.ahead(path, remote, BASE_BRANCH)
     ch = await _git(path, "cherry", f"{remote}/{BASE_BRANCH}", "HEAD", timeout=12)
     if ch is not None:
         return sum(1 for ln in ch.splitlines() if ln.startswith("+"))
@@ -1379,8 +1385,35 @@ async def _git_ahead(path: str) -> int | None:
 
 async def _own_commits_count(path: str) -> int | None:
     remote = await _upstream_remote()
+    if jj_workspaces.is_workspace(path):
+        return await jj_workspaces.ahead(path, remote, BASE_BRANCH)
     out = await _git(path, "rev-list", "--count", f"{remote}/{BASE_BRANCH}..HEAD")
     return int(out) if out and out.isdigit() else None
+
+
+async def _head_oid(path: str) -> str | None:
+    """Full id of the commit the worktree is at."""
+    if jj_workspaces.is_workspace(path):
+        return await jj_workspaces.tip_oid(path)
+    return await _git(path, "rev-parse", "HEAD")
+
+
+async def _branch_oid(path: str, repo: str, branch: str) -> str | None:
+    """The commit *branch* names, for pinning a removal verdict.
+
+    A jj bookmark made in a secondary workspace is not exported to git refs until
+    something runs in the colocated checkout, so jj is asked rather than git.
+    """
+    if jj_workspaces.is_workspace(path):
+        return await jj_workspaces.bookmark_oid(repo, branch)
+    return await _git(repo, "rev-parse", f"refs/heads/{branch}")
+
+
+async def _delete_branch(path: str, repo: str, branch: str, oid: str) -> object:
+    """Delete *branch* only while it still names *oid*."""
+    if jj_workspaces.is_workspace(path):
+        return await jj_workspaces.forget_bookmark(repo, branch, oid)
+    return await _git(repo, "update-ref", "-d", f"refs/heads/{branch}", oid, timeout=10)
 
 
 def _is_directory_at(name: str, dir_fd: int) -> bool:
@@ -1569,6 +1602,8 @@ def _is_dir_at(name: str, dir_fd: int) -> bool:
 
 
 async def _real_dirty(path: str) -> bool | None:
+    if jj_workspaces.is_workspace(path):
+        return await jj_workspaces.dirty(path)
     st = await _git(path, "status", "--porcelain")
     if st is None:
         return None
@@ -1608,6 +1643,9 @@ async def _dirty_split(path: str) -> tuple[bool | None, list[str]]:
     so they must survive byte-exact. A corrupted path would simply fail to
     match and abort the removal, which is safe but is a refusal nobody earned.
     """
+    if jj_workspaces.is_workspace(path):
+        # jj tracks every file that is not ignored: there is no untracked class.
+        return await jj_workspaces.dirty(path), []
     tracked_out = await _git(path, "status", "--porcelain", "-uno")
     tracked_dirty: bool | None = (
         None if tracked_out is None else any(ln.strip() for ln in tracked_out.splitlines())
@@ -1670,11 +1708,20 @@ async def _dirt_report(path: str) -> tuple[dict, str]:
     )
 
 
+def worktree_name(path: str, is_main: bool = False) -> str:
+    """The display name of a checkout: the base branch for main, the jj workspace
+    name for a jj workspace (jj lets it differ from the directory), else the
+    directory name."""
+    if is_main:
+        return BASE_BRANCH
+    return jj_workspaces.name_of(path) or Path(path).name
+
+
 def _find_worktree_sync(worktrees: list[dict], name: str) -> tuple[dict | None, str | None]:
     """Resolve a worktree by display name, rejecting ambiguous basenames."""
     matches = []
     for w in worktrees:
-        wname = Path(w["path"]).name if not w.get("is_main") else BASE_BRANCH
+        wname = worktree_name(w["path"], w.get("is_main", False))
         if wname == name:
             matches.append(w)
     if not matches:
@@ -1706,10 +1753,7 @@ async def _find_retained_worktree_path(name: str) -> tuple[str | None, str | Non
 
 
 async def _valid_worktree_names() -> set[str]:
-    return {
-        Path(w["path"]).name if not w.get("is_main") else BASE_BRANCH
-        for w in await _discover_worktrees()
-    }
+    return {worktree_name(w["path"], w.get("is_main", False)) for w in await _discover_worktrees()}
 
 
 async def _find_worktree_by_path(path: str) -> tuple[dict | None, str | None]:
@@ -1787,6 +1831,7 @@ __all__ = (
     "_discover_main_repo",
     "ensure_main_repo_discovered",
     "_discover_worktrees",
+    "_delete_branch",
     "_find_retained_worktree_path",
     "_find_worktree",
     "_find_worktree_by_path",
@@ -1794,6 +1839,8 @@ __all__ = (
     "_git",
     "_git_ahead",
     "_git_info",
+    "_head_oid",
+    "_branch_oid",
     "_invalid_resolution_is_stale",
     "_is_kirocrew_checkout",
     "_load_dev_fleet_cfg",
