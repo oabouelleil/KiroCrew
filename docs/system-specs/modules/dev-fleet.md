@@ -53,6 +53,8 @@ behind that facade is split by state and lifecycle ownership:
 - `jj_workspaces.py` owns everything jj: workspace discovery and the jj half of the
   per-worktree facts, rebase, and removal. It depends only on `runtime`;
   `repository`, `fleet_state`, `worktree_ops` and `worktree_ops_removal` dispatch to it.
+  Its last section serves the dashboard Git panel for any jj checkout (see "Git panel" in
+  [learn-cron-dashboard](learn-cron-dashboard.md)).
 - `live.py` owns the pointer-provider seam, live-target discovery (`_live_worktree_path`)
   and its cache, the Make Live lock and committed-cutover latch, removal-lease acquisition
   and the backend's lease client, the gateway restart, the cutover and its rollback. Its

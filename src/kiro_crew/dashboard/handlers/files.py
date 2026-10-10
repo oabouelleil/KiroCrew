@@ -28,6 +28,7 @@ import datetime as _dt  # noqa: F401
 import errno  # noqa: F401
 import functools  # noqa: F401
 import hashlib  # noqa: F401
+import importlib
 import io  # noqa: F401
 import json
 import logging
@@ -155,7 +156,10 @@ from kiro_crew.dashboard.file_api.git_panel import (  # noqa: F401
     _cat_file_lines,
     _git_repo_listing,
     _is_not_a_repo_verdict,
+    _jj_root,
+    _overlay_jj_status,
     _porcelain_unquote,
+    _prefix_below,
     _probe_git_dir,
     _project_directory_absent,
     _repo_filter_refusal_cause,
@@ -1308,6 +1312,13 @@ _SHEET_MAX_CDIR_ENTRY_BYTES = 512
 
 
 _GIT_PROBE_STDERR_CAP = 4096
+
+# Dev Fleet's jj module, imported on first call rather than at gateway boot: the Git
+# panel asks it about Jujutsu checkouts, and an owner may not import project modules
+# at runtime.
+_dev_fleet_jj = functools.partial(
+    importlib.import_module, "kiro_crew.apps.builtins.dev_fleet.jj_workspaces"
+)
 
 # The branch diff (``api_project_git_branch_diff``) compares HEAD with the first
 # of these that exists: the remote's default branch, then a local main, then the
