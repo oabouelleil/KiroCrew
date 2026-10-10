@@ -726,6 +726,9 @@ def git_build_info() -> tuple[str, str]:
     change without a restart, and status snapshots are emitted on every SSE /
     WebSocket tick, so this must not spawn ``git`` on the hot path repeatedly.
 
+    On a detached HEAD (every jj-colocated checkout) the branch is the first
+    local branch pointing at HEAD, else the literal ``"HEAD"``.
+
     Returns ``("", "")`` when there is no source tree to inspect — toolbox /
     pip-wheel installs (no ``KIROCREW_PROJECT_DIR`` or no ``.git``) — so callers
     can omit the fields gracefully. Any git failure also fails open to empty
@@ -750,10 +753,21 @@ def git_build_info() -> tuple[str, str]:
             return ""
         return result.stdout.strip()
 
-    return (
-        _run("rev-parse", "--abbrev-ref", "HEAD"),
-        _run("rev-parse", "--short", "HEAD"),
-    )
+    branch = _run("rev-parse", "--abbrev-ref", "HEAD")
+    if branch == "HEAD":
+        # A jj-colocated checkout leaves git's HEAD detached at all times; jj
+        # exports each bookmark as a plain git branch, so the branch that
+        # points at the checked-out commit is the bookmark the user means.
+        # Local heads only, sorted, so the answer is stable across restarts.
+        names = _run(
+            "for-each-ref",
+            "--points-at=HEAD",
+            "--sort=refname",
+            "--format=%(refname:short)",
+            "refs/heads",
+        ).splitlines()
+        branch = names[0] if names else branch
+    return (branch, _run("rev-parse", "--short", "HEAD"))
 
 
 def _managed_browser_cli_dirs() -> list[str]:
