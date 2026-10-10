@@ -22,6 +22,10 @@ neutralizers). ``jj`` is not a system binary on most hosts, so the operator name
 it with ``KIROCREW_DEVFLEET_BIN_JJ`` exactly as for ``gh``. jj keeps repo and
 workspace config outside the working tree (``jj config path --repo``), so unlike
 ``.git/config`` an agent-writable checkout cannot name a program for jj to run.
+
+The last section serves the dashboard Git panel, which asks the same questions of
+any jj checkout (the main one, colocated or not, as well as a secondary workspace)
+rather than of a discovered fleet row.
 """
 
 from __future__ import annotations
@@ -348,3 +352,112 @@ def _delete_workspace_dir(path: str) -> None:
     if root.is_symlink() or not (root / ".jj").is_dir():
         raise OSError(f"{path} is not a jj workspace root")
     shutil.rmtree(root)
+
+
+# --- any jj checkout: the dashboard Git panel ---------------------------------
+
+#: Commits the panel lists, newest first. An undescribed working copy is left out:
+#: its edits are the panel's Changes section, so the list starts at what git calls
+#: HEAD.
+_PANEL_LOG = '::@ ~ root() ~ (@ & description(exact:""))'
+
+
+def find_root(path: str) -> str | None:
+    """Nearest directory at or above *path* holding a ``.jj`` directory.
+
+    Blocking stats: run it off the event loop.
+    """
+    current = os.path.realpath(path)
+    while True:
+        if os.path.isdir(os.path.join(current, ".jj")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+async def checkout_branch(root: str) -> str | None:
+    """The newest bookmark at or behind ``@``, which a jj checkout has in place of
+    a checked-out branch. ``None`` when there is none or jj cannot answer."""
+    tip = await _tip(root)
+    return tip["bookmarks"][0] if tip and tip["bookmarks"] else None
+
+
+async def checkout_head(root: str) -> str | None:
+    """Short id of the checkout's tip (the bookmark's commit, else ``@``)."""
+    tip = await _tip(root)
+    return tip["oid"][:7] if tip else None
+
+
+async def checkout_changes(root: str) -> list[dict] | None:
+    """``@``'s changes as Git-panel rows ``{path, status, staged, ...}``.
+
+    ``None`` when jj cannot answer. This snapshots the working copy: the files
+    are the question, so a stale ``@`` would report a clean tree over edits.
+    jj has no index, so no row is staged. Paths are relative to *root*.
+    """
+    out = await _log(
+        root,
+        "@",
+        'diff.files().map(|f| f.status_char() ++ "\\t" ++ f.path().display() ++ "\\n").join("")'
+        ' ++ "#stat\\n" ++ diff.stat().files().map(|f| f.path().display() ++ "\\t" '
+        '++ f.lines_added() ++ "\\t" ++ f.lines_removed() ++ "\\n").join("")',
+        snapshot=True,
+        timeout=15,
+    )
+    if out is None:
+        return None
+    listed, _, counted = out.partition("#stat\n")
+    counts: dict[str, tuple[int, int]] = {}
+    for line in counted.splitlines():
+        path, _, rest = line.partition("\t")
+        added, _, removed = rest.partition("\t")
+        if added.isdigit() and removed.isdigit():
+            counts[path] = (int(added), int(removed))
+    rows: list[dict] = []
+    for line in listed.splitlines():
+        status, _, path = line.partition("\t")
+        if not status or not path:
+            continue
+        row: dict = {"path": path, "status": status, "staged": False}
+        if path in counts:
+            row["additions"], row["deletions"] = counts[path]
+        rows.append(row)
+    return rows
+
+
+async def checkout_log(root: str, limit: int) -> list[dict] | None:
+    """Newest-first ``{sha, message, author, date, isHead}`` of the checkout's
+    history; ``None`` when jj cannot answer. The first entry is the HEAD."""
+    out = await _out(
+        root,
+        "log",
+        "--no-graph",
+        "-n",
+        str(limit),
+        "-r",
+        _PANEL_LOG,
+        "-T",
+        'commit_id.short(7) ++ "\\t" ++ author.timestamp().format("%Y-%m-%dT%H:%M:%S%:z") '
+        '++ "\\t" ++ json(description.first_line()) ++ "\\t" ++ json(author.name()) ++ "\\n"',
+        timeout=15,
+    )
+    if out is None:
+        return None
+    commits: list[dict] = []
+    for line in out.splitlines():
+        parts = line.split("\t", 3)
+        if len(parts) < 4:
+            continue
+        sha, date, message, author = parts
+        commits.append(
+            {
+                "sha": sha,
+                "message": json.loads(message),
+                "author": json.loads(author),
+                "date": date,
+                "isHead": not commits,
+            }
+        )
+    return commits

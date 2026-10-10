@@ -26,6 +26,7 @@ import datetime as _dt  # noqa: F401
 import errno  # noqa: F401
 import functools
 import hashlib  # noqa: F401
+import importlib
 import io  # noqa: F401
 import json
 import logging
@@ -111,7 +112,10 @@ from kiro_crew.dashboard.file_api.dashboard_config import (  # noqa: F401
 from kiro_crew.dashboard.file_api.git_panel import (  # noqa: F401
     _GIT_PANEL_STDOUT_CAP,
     _is_not_a_repo_verdict,
+    _jj_root,
+    _overlay_jj_status,
     _porcelain_unquote,
+    _prefix_below,
     _probe_git_dir,
     _project_directory_absent,
     _repo_filter_refusal_cause,
@@ -302,13 +306,16 @@ from kiro_crew.zip_vet import (  # noqa: F401
 # Content-Type header correct for the most common Word/Excel/PowerPoint
 # downloads.
 mimetypes.add_type(
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".docx",
 )
 mimetypes.add_type(
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xlsx",
 )
 mimetypes.add_type(
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pptx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".pptx",
 )
 
 _INLINE_DISPOSITION_PREFIXES = frozenset({"audio/", "video/", "image/", "application/pdf"})
@@ -390,6 +397,7 @@ def _subagent_parent_session_key(state: DashboardState, session_key: str) -> str
 def _sel():
     """Late-binding _sel() for test monkeypatch compatibility."""
     import kiro_crew.dashboard.handlers as _pkg  # noqa: F811
+
     return _pkg.sel()
 
 
@@ -455,18 +463,28 @@ async def api_reveal_path(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid path"}, status=400)
     if is_sensitive_path(path):
         _sel().log_tool_invocation(
-            session_key="api", source="api", tool_name="reveal_path",
-            outcome="denied", error="sensitive_path",
-            resources=path, metadata={"action": action})
+            session_key="api",
+            source="api",
+            tool_name="reveal_path",
+            outcome="denied",
+            error="sensitive_path",
+            resources=path,
+            metadata={"action": action},
+        )
         return web.json_response({"error": "access denied"}, status=403)
     # Gate: only spawn native openers from direct-local requests. Remote/tunneled
     # callers get the copy-to-clipboard fallback — spawning Finder on a machine
     # the user is not looking at is surprising and useless.
     if not is_direct_local_request(request):
         _sel().log_tool_invocation(
-            session_key="api", source="api", tool_name="reveal_path",
-            outcome="denied", error="remote_request",
-            resources=path, metadata={"action": action})
+            session_key="api",
+            source="api",
+            tool_name="reveal_path",
+            outcome="denied",
+            error="remote_request",
+            resources=path,
+            metadata={"action": action},
+        )
         # Degrade to a clipboard copy: `copy` is the path to write. The remote
         # cause is recorded in the SEL audit above (error="remote_request"); the
         # response body carries no path, host, or exception detail beyond `copy`.
@@ -521,8 +539,13 @@ async def api_reveal_path(request: web.Request) -> web.Response:
         # it, so there is no check-then-use window to hold here.
         copied = not await asyncio.to_thread(platform_compat.reveal_in_file_manager, path)
     _sel().log_tool_invocation(
-        session_key="api", source="api", tool_name="reveal_path",
-        outcome="success", resources=path, metadata={"action": action})
+        session_key="api",
+        source="api",
+        tool_name="reveal_path",
+        outcome="success",
+        resources=path,
+        metadata={"action": action},
+    )
     # A local grant whose host had no working file manager degrades to the
     # clipboard; `copy` is the path to write.
     if copied:
@@ -651,9 +674,7 @@ async def api_outbox_notify(request: web.Request) -> web.Response:
         # credential written at UTF-16/UTF-32 spacing is NUL-interleaved ASCII,
         # which is valid UTF-8, so it decodes cleanly into this branch and the
         # contiguous-ASCII detectors in ``redact`` match none of it.
-        flagged = redact(text) != text or await asyncio.to_thread(
-            wide_content_is_flagged, raw
-        )
+        flagged = redact(text) != text or await asyncio.to_thread(wide_content_is_flagged, raw)
         if flagged and not await asyncio.to_thread(
             file_delivery_consent.is_granted, file_delivery_consent.CLASS_OWNER_DASHBOARD
         ):
@@ -1022,7 +1043,11 @@ async def api_outbox_download(request: web.Request) -> web.StreamResponse:
                 )
             _audit_consented_handover()
     # Inline disposition for media types the browser can render
-    disposition = "inline" if any(content_type.startswith(t) for t in _INLINE_DISPOSITION_PREFIXES) else "attachment"
+    disposition = (
+        "inline"
+        if any(content_type.startswith(t) for t in _INLINE_DISPOSITION_PREFIXES)
+        else "attachment"
+    )
     # SVG can contain scripts — never serve inline on the dashboard origin
     if content_type == "image/svg+xml":
         disposition = "attachment"
@@ -1323,9 +1348,7 @@ async def api_slack_upload_file(request: web.Request) -> web.Response:
             return web.json_response(
                 {"error": destination.error, "code": destination.code}, status=400
             )
-        return web.json_response(
-            {"error": destination.error, "code": destination.code}, status=403
-        )
+        return web.json_response({"error": destination.error, "code": destination.code}, status=403)
     if isinstance(destination, upload_destination.Skip):
         _audit_file_send(leg="slack", outcome="skipped", error=destination.reason)
         return web.json_response({"ok": True, "skipped": destination.reason})
@@ -1464,9 +1487,7 @@ async def api_channel_upload_file(request: web.Request) -> web.Response:
         downstream=link.channel_type,
         resources=f"channel_type={link.channel_type} file={body.get('file_path', '')}",
     )
-    return web.json_response(
-        {"ok": True, "delivered": True, "channel_type": link.channel_type}
-    )
+    return web.json_response({"ok": True, "delivered": True, "channel_type": link.channel_type})
 
 
 async def api_upload(request: web.Request) -> web.Response:
@@ -1676,9 +1697,7 @@ _ALLOWED_VIDEO_EXT = {".mp4", ".m4v", ".mov", ".webm"}
 #: only: naming the video set to an audio upload (``.m4a``) would tell its
 #: sender to re-encode audio into a video container, which is worse than the
 #: bare refusal.
-_VIDEO_HINT_EXT = frozenset(
-    {".mkv", ".ogv", ".avi", ".mpg", ".mpeg", ".wmv", ".flv", ".3gp"}
-)
+_VIDEO_HINT_EXT = frozenset({".mkv", ".ogv", ".avi", ".mpg", ".mpeg", ".wmv", ".flv", ".3gp"})
 #: Media type :func:`_sniff_media_type` must report for the claimed video
 #: extension. The MP4 family (mp4/m4v/mov) all carry a ``ftyp`` box at offset 4
 #: and sniff as ``video/mp4``; QuickTime's brand differs but the box does not.
@@ -1904,9 +1923,7 @@ async def _run_path_probe(
     gives up on a wedged call cannot make the pool believe a slot is free while
     the thread is still parked; nothing here has to track that.
     """
-    pool = (
-        executors.path_transfer_executor() if transfer else executors.path_probe_executor()
-    )
+    pool = executors.path_transfer_executor() if transfer else executors.path_probe_executor()
     try:
         return await executors.run_in_cron_pool(
             fn,
@@ -1937,13 +1954,20 @@ def _probe_busy_response(
     """
     if tool_name:
         _sel().log_tool_invocation(
-            session_key=session_key, source=source, tool_name=tool_name,
-            outcome="failure", error="path_probe_busy", resources=resource,
+            session_key=session_key,
+            source=source,
+            tool_name=tool_name,
+            outcome="failure",
+            error="path_probe_busy",
+            resources=resource,
         )
     else:
         _sel().log_api_access(
-            caller=caller, operation=operation, outcome="failure",
-            resources=resource, error="path_probe_busy",
+            caller=caller,
+            operation=operation,
+            outcome="failure",
+            resources=resource,
+            error="path_probe_busy",
         )
     return web.json_response(
         {"error": "file system probe capacity exhausted; retry shortly", "code": "path_probe_busy"},
@@ -2030,12 +2054,45 @@ _FILE_READ_SNIFF_BYTES = 8192
 #: ``test_dashboard_file_io.py`` fails if the two sets ever diverge.
 _FILE_READ_BINARY_EXTS = frozenset(
     {
-        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".pdf",
-        ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
-        ".so", ".dylib", ".dll", ".exe", ".class", ".jar", ".war", ".o", ".a",
-        ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv", ".webm",
-        ".sqlite", ".db", ".duckdb",
-        ".ttf", ".otf", ".woff", ".woff2", ".eot",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bmp",
+        ".ico",
+        ".tiff",
+        ".pdf",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".bz2",
+        ".7z",
+        ".rar",
+        ".so",
+        ".dylib",
+        ".dll",
+        ".exe",
+        ".class",
+        ".jar",
+        ".war",
+        ".o",
+        ".a",
+        ".mp3",
+        ".mp4",
+        ".wav",
+        ".avi",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".sqlite",
+        ".db",
+        ".duckdb",
+        ".ttf",
+        ".otf",
+        ".woff",
+        ".woff2",
+        ".eot",
     }
 )
 
@@ -2288,7 +2345,10 @@ async def api_file_raw(request: web.Request) -> web.Response:
 
     def _log(outcome: str, res: str) -> None:
         _sel().log_tool_invocation(
-            session_key="dashboard", tool_name="file_raw", outcome=outcome, resources=res,
+            session_key="dashboard",
+            tool_name="file_raw",
+            outcome=outcome,
+            resources=res,
         )
 
     # Raster types are detected by the shared sniffer
@@ -2359,12 +2419,12 @@ def _resolve_diff_path(raw: str) -> tuple[str, bool]:
 # mime). MP4-family uses the ftyp box at offset 4 (bytes 0-3 are the box
 # size); WebM and Matroska share the EBML magic and both play in <video>.
 _MEDIA_MAGIC: tuple[tuple[int, bytes, str], ...] = (
-    (4, b"ftyp", "video/mp4"),          # mp4 / m4v / m4a / mov (BMFF family)
+    (4, b"ftyp", "video/mp4"),  # mp4 / m4v / m4a / mov (BMFF family)
     (0, b"\x1a\x45\xdf\xa3", "video/webm"),  # webm / mkv (EBML)
-    (0, b"OggS", "audio/ogg"),          # ogg audio or video; <audio>/<video> both accept
+    (0, b"OggS", "audio/ogg"),  # ogg audio or video; <audio>/<video> both accept
     (0, b"fLaC", "audio/flac"),
-    (0, b"ID3", "audio/mpeg"),          # mp3 with ID3v2 tag
-    (0, b"\xff\xfb", "audio/mpeg"),     # bare mp3 frame sync (MPEG1 layer3)
+    (0, b"ID3", "audio/mpeg"),  # mp3 with ID3v2 tag
+    (0, b"\xff\xfb", "audio/mpeg"),  # bare mp3 frame sync (MPEG1 layer3)
     (0, b"\xff\xf3", "audio/mpeg"),
     (0, b"\xff\xf2", "audio/mpeg"),
 )
@@ -2632,12 +2692,13 @@ async def api_file_grep(request: web.Request) -> web.Response:
     # An empty root is a refused name or a credential store; both get the 403.
     if not root:
         _sel().log_api_access(
-            caller=caller, operation="file_grep", outcome="denied",
-            resources=raw_root, error="sensitive path",
+            caller=caller,
+            operation="file_grep",
+            outcome="denied",
+            resources=raw_root,
+            error="sensitive path",
         )
-        return web.json_response(
-            {"error": "Access denied", "code": "sensitive_path"}, status=403
-        )
+        return web.json_response({"error": "Access denied", "code": "sensitive_path"}, status=403)
     if not root_is_dir:
         # Spelled out rather than spread from `empty`: the error-code ratchet
         # reads response bodies as literals.
@@ -2668,28 +2729,30 @@ async def api_file_grep(request: web.Request) -> web.Response:
         return results + doc_hits, truncated or doc_truncated, engine, skipped
 
     try:
-        results, truncated, engine, skipped_docs = await _run_path_probe(
-            _search, transfer=True
-        )
+        results, truncated, engine, skipped_docs = await _run_path_probe(_search, transfer=True)
     except _PathProbeBusy:
         return _probe_busy_response(
             resource=f"q={logged_query} root={root}", operation="file_grep", caller=caller
         )
 
     _sel().log_api_access(
-        caller=caller, operation="file_grep", outcome="allowed",
+        caller=caller,
+        operation="file_grep",
+        outcome="allowed",
         resources=(
             f"q={logged_query} root={root} engine={engine} results={len(results)} "
             f"truncated={truncated} skipped_docs={skipped_docs}"
         ),
     )
-    return web.json_response({
-        "results": results,
-        "truncated": truncated,
-        "engine": engine,
-        "skipped_docs": skipped_docs,
-        "root": root,
-    })
+    return web.json_response(
+        {
+            "results": results,
+            "truncated": truncated,
+            "engine": engine,
+            "skipped_docs": skipped_docs,
+            "root": root,
+        }
+    )
 
 
 async def api_file_diff(request: web.Request) -> web.Response:
@@ -2699,7 +2762,12 @@ async def api_file_diff(request: web.Request) -> web.Response:
         return owner_denied
     raw_path = request.query.get("path", "").strip()
     if not raw_path:
-        _sel().log_api_access(caller=request.get("user", "dashboard"), operation="file_diff", outcome="allowed", resources="empty_path")
+        _sel().log_api_access(
+            caller=request.get("user", "dashboard"),
+            operation="file_diff",
+            outcome="allowed",
+            resources="empty_path",
+        )
         return web.json_response({"diff": "", "original": ""})
     # Off-loop: realpath then the isfile probe, on a caller-supplied path.
     try:
@@ -2709,10 +2777,22 @@ async def api_file_diff(request: web.Request) -> web.Response:
             resource=raw_path, operation="file_diff", caller=request.get("user", "dashboard")
         )
     if not path_is_file:
-        _sel().log_api_access(caller=request.get("user", "dashboard"), operation="file_diff", outcome="allowed", resources=f"path={raw_path}", error="not_found")
+        _sel().log_api_access(
+            caller=request.get("user", "dashboard"),
+            operation="file_diff",
+            outcome="allowed",
+            resources=f"path={raw_path}",
+            error="not_found",
+        )
         return web.json_response({"diff": "", "original": ""})
     if is_sensitive_path(raw_path):
-        _sel().log_api_access(caller=request.get("user", "dashboard"), operation="file_diff", outcome="denied", resources=raw_path, error="sensitive path")
+        _sel().log_api_access(
+            caller=request.get("user", "dashboard"),
+            operation="file_diff",
+            outcome="denied",
+            resources=raw_path,
+            error="sensitive path",
+        )
         return web.json_response({"error": "Access denied"}, status=403)
 
     dirpath = os.path.dirname(raw_path)
@@ -2720,15 +2800,34 @@ async def api_file_diff(request: web.Request) -> web.Response:
     def _run() -> dict:
         # Disable textconv/filter drivers and fsmonitor to prevent code execution
         # via .gitattributes or .git/config in untrusted repos.
-        _git = ["git", "-c", "diff.textconv=", "-c", "core.attributesFile=/dev/null", "-c", "core.fsmonitor="]
+        _git = [
+            "git",
+            "-c",
+            "diff.textconv=",
+            "-c",
+            "core.attributesFile=/dev/null",
+            "-c",
+            "core.fsmonitor=",
+        ]
         _env = {**os.environ, "GIT_ATTR_NOSYSTEM": "1"}
         try:
             subprocess.run(
                 [*_git, "rev-parse", "--git-dir"],
-                cwd=dirpath, capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=5, check=True, env=_env,
+                cwd=dirpath,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+                check=True,
+                env=_env,
             )
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, UnicodeDecodeError):
+        except (
+            subprocess.TimeoutExpired,
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+            UnicodeDecodeError,
+        ):
             # Only a failed repository preflight may claim "not a git repo":
             # the client renders not_git as "there is no baseline", which is a
             # statement about the file, not about git's health. Failures past
@@ -2739,35 +2838,68 @@ async def api_file_diff(request: web.Request) -> web.Response:
             # Get HEAD content
             root = subprocess.run(
                 [*_git, "rev-parse", "--show-toplevel"],
-                cwd=dirpath, capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=5, env=_env,
+                cwd=dirpath,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+                env=_env,
             ).stdout.strip()
             rel = os.path.relpath(raw_path, root)
             head = subprocess.run(
                 [*_git, "show", "--no-textconv", f"HEAD:{rel}"],
-                cwd=dirpath, capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=10, env=_env,
+                cwd=dirpath,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                env=_env,
             )
             original = head.stdout if head.returncode == 0 else ""
             # Get diff
             r = subprocess.run(
                 [*_git, "diff", "--no-textconv", "--no-ext-diff", "HEAD", "--", raw_path],
-                cwd=dirpath, capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=10, env=_env,
+                cwd=dirpath,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                env=_env,
             )
             diff = r.stdout.strip() if r.returncode == 0 else ""
             if not diff:
                 # Check for untracked file
                 r2 = subprocess.run(
                     [*_git, "status", "--porcelain", "--", raw_path],
-                    cwd=dirpath, capture_output=True, text=True, encoding="utf-8",
-                    errors="replace", timeout=5, env=_env,
+                    cwd=dirpath,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=5,
+                    env=_env,
                 )
                 if r2.returncode == 0 and r2.stdout.strip().startswith("??"):
                     r3 = subprocess.run(
-                        [*_git, "diff", "--no-textconv", "--no-ext-diff", "--no-index", "/dev/null", raw_path],
-                        cwd=dirpath, capture_output=True, text=True, encoding="utf-8",
-                        errors="replace", timeout=10, env=_env,
+                        [
+                            *_git,
+                            "diff",
+                            "--no-textconv",
+                            "--no-ext-diff",
+                            "--no-index",
+                            "/dev/null",
+                            raw_path,
+                        ],
+                        cwd=dirpath,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=10,
+                        env=_env,
                     )
                     diff = r3.stdout if r3.stdout else ""
                     return {"diff": diff, "original": "", "status": "untracked"}
@@ -2784,7 +2916,12 @@ async def api_file_diff(request: web.Request) -> web.Response:
                 return {"diff": "", "original": original, "status": "error"}
             status = "modified" if diff else "clean"
             return {"diff": diff, "original": original, "status": status}
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, UnicodeDecodeError):
+        except (
+            subprocess.TimeoutExpired,
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+            UnicodeDecodeError,
+        ):
             return {"diff": "", "original": "", "status": "error"}
 
     # Same verdict as ``api_file_read`` for the same caller: the panel compares
@@ -2816,7 +2953,12 @@ async def api_file_diff(request: web.Request) -> web.Response:
         return result
 
     result = await asyncio.to_thread(_run_redacted)
-    _sel().log_api_access(caller=request.get("user", "dashboard"), operation="file_diff", outcome="allowed", resources=f"path={raw_path}")
+    _sel().log_api_access(
+        caller=request.get("user", "dashboard"),
+        operation="file_diff",
+        outcome="allowed",
+        resources=f"path={raw_path}",
+    )
     return web.json_response(result)
 
 
@@ -2842,12 +2984,20 @@ async def api_browse_dirs(request: web.Request) -> web.Response:
     caller = request.get("user", "dashboard")
     if request.query.get("drives") == "1":
         if not platform_compat.IS_WINDOWS:
-            return web.json_response({"error": "Drive listing is only available on Windows", "code": "drives_windows_only"}, status=400)
+            return web.json_response(
+                {
+                    "error": "Drive listing is only available on Windows",
+                    "code": "drives_windows_only",
+                },
+                status=400,
+            )
         try:
             drives = await _run_path_probe(_browse_drives_sync, transfer=True)
         except _PathProbeBusy:
             return _probe_busy_response(resource="drives", operation="browse_dirs", caller=caller)
-        _sel().log_api_access(caller=caller, operation="browse_dirs", outcome="allowed", resources="drives")
+        _sel().log_api_access(
+            caller=caller, operation="browse_dirs", outcome="allowed", resources="drives"
+        )
         return web.json_response({"path": "", "parent": "", "dirs": drives})
     raw = request.query.get("path", "").strip()
     # Off-loop: realpath then the isdir probe, on a caller-supplied root (the
@@ -2866,9 +3016,26 @@ async def api_browse_dirs(request: web.Request) -> web.Response:
             status=400,
         )
     if is_sensitive_path(base):
-        _sel().log_api_access(caller=caller, operation="browse_dirs", outcome="denied", resources=base, error="sensitive path")
+        _sel().log_api_access(
+            caller=caller,
+            operation="browse_dirs",
+            outcome="denied",
+            resources=base,
+            error="sensitive path",
+        )
         return web.json_response({"error": "Access denied", "code": "access_denied"}, status=403)
-    skip = {".git", "node_modules", "__pycache__", ".cache", ".venv", "venv", "env", ".kirocrew", ".kiro", ".aim"}
+    skip = {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".cache",
+        ".venv",
+        "venv",
+        "env",
+        ".kirocrew",
+        ".kiro",
+        ".aim",
+    }
     skip |= _HIDDEN_TOOL_DIRS
     try:
         dirs = await _run_path_probe(_browse_dirs_sync, base, skip, transfer=True)
@@ -2920,16 +3087,40 @@ async def api_browse_files(request: web.Request) -> web.Response:
             status=400,
         )
     if is_sensitive_path(base):
-        _sel().log_api_access(caller=caller, operation="browse_files", outcome="denied", resources=base, error="sensitive path")
+        _sel().log_api_access(
+            caller=caller,
+            operation="browse_files",
+            outcome="denied",
+            resources=base,
+            error="sensitive path",
+        )
         return web.json_response({"error": "Access denied", "code": "access_denied"}, status=403)
-    skip = {".git", "node_modules", "__pycache__", ".cache", ".venv", "venv", "env", ".kirocrew", ".kiro", ".aim", "build", "dist", ".next"}
+    skip = {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".cache",
+        ".venv",
+        "venv",
+        "env",
+        ".kirocrew",
+        ".kiro",
+        ".aim",
+        "build",
+        "dist",
+        ".next",
+    }
     skip |= _HIDDEN_TOOL_DIRS
     try:
         dirs, files = await _run_path_probe(_browse_files_sync, base, skip, transfer=True)
     except _PathProbeBusy:
         return _probe_busy_response(resource=base, operation="browse_files", caller=caller)
-    _sel().log_api_access(caller=caller, operation="browse_files", outcome="allowed", resources=base)
-    return web.json_response({"path": base, "parent": _browse_parent(base), "dirs": dirs, "files": files})
+    _sel().log_api_access(
+        caller=caller, operation="browse_files", outcome="allowed", resources=base
+    )
+    return web.json_response(
+        {"path": base, "parent": _browse_parent(base), "dirs": dirs, "files": files}
+    )
 
 
 # ── /api/file-sheet: xlsx → JSON cell grid (file_api/sheet.py) ───────────────
@@ -2964,6 +3155,14 @@ _SHEET_MAX_CDIR_ENTRY_BYTES = 512
 _GIT_PROBE_STDERR_CAP = 4096
 
 
+# Dev Fleet's jj module, imported on first call rather than at gateway boot: the Git
+# panel asks it about Jujutsu checkouts, and an owner may not import project modules
+# at runtime.
+_dev_fleet_jj = functools.partial(
+    importlib.import_module, "kiro_crew.apps.builtins.dev_fleet.jj_workspaces"
+)
+
+
 # Repo-scoped config keys that hand git a program to run when it touches file
 # content (status re-hashes modified files through ``filter.<name>.clean``).
 # ``-c`` cannot neutralize arbitrary driver names, so a repo declaring one is
@@ -2978,9 +3177,7 @@ _GIT_PROBE_STDERR_CAP = 4096
 # refuses under its own ``"unreadable"`` cause rather than borrowing this one.
 # Refusing both is correct, since neither can be proven safe, but telling the
 # reader a program ran is not, and neither is handing them both causes at once.
-_GIT_FILTER_KEY_RE = re.compile(
-    r"^filter\..+\.(process|smudge|clean)$", re.IGNORECASE
-)
+_GIT_FILTER_KEY_RE = re.compile(r"^filter\..+\.(process|smudge|clean)$", re.IGNORECASE)
 
 
 # Cap on the ROWS api_project_tree returns -- files and directory rows

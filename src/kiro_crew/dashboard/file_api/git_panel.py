@@ -9,6 +9,7 @@ import posixpath
 import stat as _stat_mod
 import subprocess
 import threading
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 from aiohttp import web
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
         _GIT_PROBE_STDERR_CAP,
         ConfigHookScanError,
         DashboardState,
+        _dev_fleet_jj,
         _match_known_project_for,
         _redact_project_path,
         _sel,
@@ -307,6 +309,68 @@ def _repo_filter_refusal_cause(git_cmd: list[str], base: str, env: dict) -> str:
     return ""
 
 
+def _prefix_below(base: str, repo_root: str) -> str:
+    """Repo-root-relative prefix of the project directory *base* ('' at the root).
+
+    Status paths are repo-root-relative; when the project directory sits below the
+    repo root, every path starts with this prefix.
+    """
+    rel = os.path.relpath(base, repo_root)
+    return "" if rel in (".", "") or rel.startswith("..") else rel.replace(os.sep, posixpath.sep)
+
+
+async def _jj_root(base: str) -> tuple[ModuleType, str] | None:
+    """``(jj_workspaces module, root)`` when *base* is in a Jujutsu checkout, else ``None``.
+
+    The panel asks Git first and Jujutsu where one is present: a colocated
+    checkout leaves Git's HEAD detached, and a secondary jj workspace may have no
+    ``.git`` at all. The module belongs to Dev Fleet, whose runner is the one place
+    that resolves a trusted ``jj`` executable and sandboxes it; the facade's
+    ``_dev_fleet_jj`` loads it on first use. A host where jj cannot run answers
+    ``None`` from every call below, so the panel keeps its Git answer.
+    """
+    jj_workspaces = _dev_fleet_jj()
+    root = await asyncio.to_thread(jj_workspaces.find_root, base)
+    return (jj_workspaces, root) if root else None
+
+
+async def _overlay_jj_status(base: str, result: dict) -> dict:
+    """Apply Jujutsu to a Git status *result* for a project directory in a jj checkout.
+
+    A repository Git read but left on a detached HEAD (colocated jj) gets the jj
+    bookmark as its branch label; the file list stays Git's, which reads the live
+    working tree without writing. A directory Git does not know (a secondary
+    workspace) is answered by jj entirely. Outages and refusals pass through.
+    """
+    if result.keys() & {"_status_unavailable", "_status_filter_refused"}:
+        return result
+    found = await _jj_root(base)
+    if found is None:
+        return result
+    jj, root = found
+    if result.get("repo"):
+        if result.get("branch") in (None, "HEAD"):
+            branch = await jj.checkout_branch(root)
+            if branch:
+                result["branch"] = branch
+        return result
+    files = await jj.checkout_changes(root)
+    if files is None:
+        return result
+    answer: dict = {
+        "repo": True,
+        "repoRoot": root,
+        "files": files[:500],
+        "_prefix": _prefix_below(base, root),
+    }
+    if len(files) > 500:
+        answer["truncated"] = True
+    branch = await jj.checkout_branch(root) or await jj.checkout_head(root)
+    if branch:
+        answer["branch"] = branch
+    return answer
+
+
 async def api_project_git_status(request: web.Request) -> web.Response:
     """GET /api/project/git/status?path=... - working tree status for a project dir.
 
@@ -564,12 +628,7 @@ async def api_project_git_status(request: web.Request) -> web.Response:
             pass
 
         result: dict = {"repo": True, "repoRoot": repo_root, "files": files[:500]}
-        # Status paths are repo-root-relative; when the project directory sits
-        # below the repo root, every path starts with this prefix.
-        rel = os.path.relpath(base, repo_root)
-        result["_prefix"] = (
-            "" if rel in (".", "") or rel.startswith("..") else rel.replace(os.sep, posixpath.sep)
-        )
+        result["_prefix"] = _prefix_below(base, repo_root)
         if len(files) > 500:
             result["truncated"] = True
         if branch:
@@ -589,6 +648,7 @@ async def api_project_git_status(request: web.Request) -> web.Response:
     # while the directory still exists is an operational outage.
     if await asyncio.to_thread(_project_directory_absent, base):
         return web.json_response({"repo": False, "files": []})
+    result = await _overlay_jj_status(base, result)
     _status_refusal = result.pop("_status_filter_refused", "")
     if _status_refusal:
         return web.json_response(
@@ -838,7 +898,15 @@ async def api_project_git_log(request: web.Request) -> web.Response:
             )
         return {"repo": True, "commits": commits}
 
-    result = await asyncio.to_thread(_run)
+    # Jujutsu answers the history of a jj checkout (its working-copy commit, which
+    # Git's detached HEAD hides); a host where jj cannot run falls through to Git.
+    jj_found = await _jj_root(base)
+    jj_commits = await jj_found[0].checkout_log(jj_found[1], limit) if jj_found else None
+    result = (
+        {"repo": True, "commits": jj_commits}
+        if jj_commits is not None
+        else await asyncio.to_thread(_run)
+    )
     # Same vanished-directory re-check as the status route: a project directory
     # deleted between the isdir gate and the spawn is absence, not an outage.
     if await asyncio.to_thread(_project_directory_absent, base):
