@@ -1394,6 +1394,49 @@ class TestGitBuildInfo:
         assert env.git_build_info() == ("wt-branch", "def5678")
         env.git_build_info.cache_clear()
 
+    @staticmethod
+    def _detached_repo(tmp_path, *branches: str) -> None:
+        def git(*args: str) -> None:
+            subprocess.run(
+                ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                cwd=tmp_path,
+                check=True,
+                capture_output=True,
+            )
+
+        git("init", "-q", "-b", "trunk")
+        git("commit", "-q", "--allow-empty", "-m", "c")
+        for name in branches:
+            git("branch", name)
+        git("checkout", "-q", "--detach")
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_detached_head_reports_branch_pointing_at_it(self, tmp_path, monkeypatch) -> None:
+        # jj-colocated checkouts keep git's HEAD detached; the exported bookmark
+        # is a plain branch at the same commit.
+        from kiro_crew import env
+
+        env.git_build_info.cache_clear()
+        self._detached_repo(tmp_path, "omar/dev")
+        monkeypatch.setenv("KIROCREW_PROJECT_DIR", str(tmp_path))
+        branch, commit = env.git_build_info()
+        assert branch == "omar/dev"
+        assert commit
+        env.git_build_info.cache_clear()
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_detached_head_without_branch_stays_head(self, tmp_path, monkeypatch) -> None:
+        from kiro_crew import env
+
+        env.git_build_info.cache_clear()
+        self._detached_repo(tmp_path)
+        subprocess.run(
+            ["git", "branch", "-D", "trunk"], cwd=tmp_path, check=True, capture_output=True
+        )
+        monkeypatch.setenv("KIROCREW_PROJECT_DIR", str(tmp_path))
+        assert env.git_build_info()[0] == "HEAD"
+        env.git_build_info.cache_clear()
+
     def test_fails_open_on_nonzero_exit(self, tmp_path, monkeypatch) -> None:
         from kiro_crew import env
 
