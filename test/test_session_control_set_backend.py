@@ -154,7 +154,7 @@ def test_a_caller_without_reach_is_refused(world):
 def test_the_caller_itself_is_refused(world):
     error = _refused(world, "codex", target="chat-1")
 
-    assert error.status in (400, 403)
+    assert error.code == "self_target"
     assert world.resets == []
 
 
@@ -178,6 +178,10 @@ def test_the_preview_off_is_refused(world, _floor_monkeypatch):
 
     assert (error.status, error.code) == (403, "session_harness_preview_off")
     _unchanged(world)
+    # Checked first: an unknown target or a bad name reads the same, and nothing is
+    # audited, so the tool says nothing about which sessions exist.
+    assert _refused(world, "", target="no-such-session").code == "session_harness_preview_off"
+    assert world.audits == []
 
 
 @pytest.mark.parametrize(
@@ -199,8 +203,9 @@ def test_a_missing_name_is_refused_before_the_gate(world, raw):
 
 
 def test_a_target_that_leaves_reach_during_the_switch_is_refused_at_the_commit(world, monkeypatch):
-    """The gate runs again right before the commit. Mutation guard: authorizing
-    only up front lets the switch reach a session that became mirrored meanwhile."""
+    """The gate runs again right before the commit, and its own refusal comes back.
+    Mutation guard: authorizing only up front lets the switch reach a session that
+    became mirrored meanwhile."""
 
     async def mirror_meanwhile(*_a, **_kw):
         world.state.sessions.set_mirror_link(slot_history_key(world.worker), "C0FFEE", "1.2")
@@ -210,8 +215,9 @@ def test_a_target_that_leaves_reach_during_the_switch_is_refused_at_the_commit(w
 
     error = _refused(world, "codex")
 
-    assert (error.status, error.code) == (403, "caller_not_permitted")
+    assert error.code == "mirrored_target"
     _unchanged(world)
+    assert all(row["outcome"] != "allowed" for row in world.audits)
 
 
 def test_a_switch_that_raises_is_reported_and_audited(world, monkeypatch):

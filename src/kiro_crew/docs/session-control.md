@@ -738,8 +738,9 @@ switching back. The new harness survives a gateway restart.
 Only an idle session is switched. A turn in flight (`turn_in_flight`) or attached
 sub-agents (`slot_subagents_running`) refuse it with nothing changed; to force it,
 call `session_stop`, then retry once the target is idle. The permission check runs
-again right before the switch is stored, so a target that became mirrored or
-otherwise out of reach meanwhile is refused with `caller_not_permitted`.
+again right before the switch is stored, and before a declined reset is retried, so
+a target that became mirrored or otherwise out of reach meanwhile is refused with
+that check's own code (for example `mirrored_target`) and keeps its harness.
 
 Also refused, with nothing changed:
 
@@ -748,10 +749,14 @@ Also refused, with nothing changed:
   message lists the harnesses that can start. Failover is never walked, because
   the caller named the harness;
 - an empty name (`invalid_backend`);
-- a session whose harness its channel, schedule, workflow or Bot sets
+- a session whose harness its channel, schedule, workflow or Bot sets: a linked
+  tab is refused by the permission check (`linked_session_target`, or
+  `unattended_target` for a scheduled run's own session), and a member DM, a Bot's
+  own worker or a channel-driven session by the switch
   (`harness_switch_unsupported`);
 - any call while the feature preview `dashboard.feature_previews.session_harness`
-  is off (code session_harness_preview_off, HTTP 403). The tool is not listed then.
+  is off (code session_harness_preview_off, HTTP 403), checked before anything
+  else. The tool is not listed then.
 
 A target already on the named harness keeps its session and answers success.
 

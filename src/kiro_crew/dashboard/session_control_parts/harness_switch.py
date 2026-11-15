@@ -54,8 +54,15 @@ async def set_backend_target(
     ``caller_fenced`` has the meaning ``stop_target`` documents.
     """
     # Deferred for the same import cycle `stop_target` documents.
+    from kiro_crew import session_harness_preview as harness_preview
     from kiro_crew.dashboard.chat_handlers import SlotAgentSwitchCaller, switch_slot_harness
 
+    # Before any other read, as the create route checks it: with the preview off the
+    # tool says nothing about which sessions exist.
+    if not await asyncio.to_thread(harness_preview.session_harness_enabled):
+        raise SessionControlError(
+            harness_preview.PREVIEW_OFF_MESSAGE, code=harness_preview.PREVIEW_OFF_CODE, status=403
+        )
     # Validated before any gate, as `set_model_target` does.
     if not isinstance(backend, str) or not backend.strip():
         raise SessionControlError(
@@ -81,8 +88,12 @@ async def set_backend_target(
     )
     slot_key = slot.key
 
+    # The refusal the commit-time gate raised, so the caller reads its own code
+    # (``mirrored_target``, ...) rather than the switch's generic one.
+    withdrawn: list[SessionControlError] = []
+
     def still_permitted() -> bool:
-        return _still_reachable(state, slot, caller_session_key, caller_fenced)
+        return _still_reachable(state, slot, caller_session_key, caller_fenced, withdrawn)
 
     caller = SlotAgentSwitchCaller(
         app="", remote="session_control", owner=False, still_permitted=still_permitted
@@ -105,6 +116,9 @@ async def set_backend_target(
             status=500,
         ) from exc
     body = json.loads(response.text or "{}")
+    if withdrawn and body.get("code") == "caller_not_permitted":
+        # authorize_target already audited this denial.
+        raise withdrawn[0]
     if response.status != 200:
         code = str(body.get("code") or "set_backend_failed")
         _audit(
@@ -136,10 +150,24 @@ async def set_backend_target(
 
 
 def _still_reachable(
-    state: "DashboardState", slot: "_ChatSlot", caller_session_key: str, caller_fenced: bool
+    state: "DashboardState",
+    slot: "_ChatSlot",
+    caller_session_key: str,
+    caller_fenced: bool,
+    withdrawn: list[SessionControlError],
 ) -> bool:
-    """Whether the caller may still act on *slot*, judged synchronously at the commit."""
+    """Whether the caller may still act on *slot*, judged synchronously at the commit.
+
+    A refusal is appended to *withdrawn*.
+    """
     if state._slots.get(slot.key) is not slot:
+        withdrawn.append(
+            SessionControlError(
+                "the target session was replaced; harness not changed",
+                code="target_replaced",
+                status=409,
+            )
+        )
         return False
     try:
         live = authorize_target(
@@ -150,6 +178,7 @@ def _still_reachable(
             skip_enabled_check=True,
             precomputed_ownership_fenced=caller_fenced,
         )
-    except SessionControlError:
+    except SessionControlError as exc:
+        withdrawn.append(exc)
         return False
     return live is slot
