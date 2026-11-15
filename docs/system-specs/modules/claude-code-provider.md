@@ -113,6 +113,15 @@ the provider's own remedy. See the Lost backend session entry in
 `errorKind`, not a harness check, so any backend that emits that kind is
 recycled the same way.
 
+### Usage limits
+
+A turn the CLI stops on a spent claude.ai allowance (the 5-hour, weekly, Opus or
+Sonnet limit) fails with `data.errorKind: rate_limit` and the turn's latest
+`rateLimit` info. A `rateLimit.status` of `rejected` makes it a terminal
+`usage_limit` row whatever the sentence says, and its `resetsAt` is the reset
+time the card shows and the automatic continue waits for. The rest of the rule is
+the Usage limit entry in [error handling](../common/error-handling.md).
+
 ### Overloaded answers
 
 Anthropic's 529 overload reaches Crew as `Internal error: API Error: 529 {...}` or,

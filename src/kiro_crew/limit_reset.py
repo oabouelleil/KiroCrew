@@ -6,6 +6,10 @@ Monday at 9am", "... resets in 2 hours 10 minutes"). :func:`parse_limit_reset`
 turns that clause into an epoch second, so the usage-limit card can show the
 time without reading the sentence again.
 
+:func:`read_usage_limit` is what the ACP error path calls: it prefers a reset time
+the harness sends as data (claude-agent-acp's ``rateLimit.resetsAt``) and falls back
+to the sentence, and names the window when the harness does (:class:`UsageLimit`).
+
 The clock comes in as an argument; nothing is read from the host except the
 local zone for a clock time that names none. A clause it cannot read (a zone
 name that does not load included), one that is not ahead, or one beyond
@@ -18,7 +22,9 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -128,6 +134,11 @@ def _parse(text: str, moment: datetime) -> float | None:
             logger.warning("usage-limit reset clause is not a time this parser reads; dropped")
             return None
         at = when.timestamp()
+    return _bounded(at, moment)
+
+
+def _bounded(at: float, moment: datetime) -> float | None:
+    """*at* when it is ahead of *moment* and no further than the cap, else ``None``."""
     ahead = at - moment.timestamp()
     if ahead <= 0:
         logger.warning("usage-limit reset time is not ahead; dropped")
@@ -153,3 +164,68 @@ def parse_limit_reset(text: str, now: datetime | None = None) -> float | None:
     except Exception as exc:  # a malformed clause must never break the error path
         logger.warning("usage-limit reset time could not be read (%s); dropped", type(exc).__name__)
         return None
+
+
+#: A window name a harness may give, kept only in this shape so a frame cannot put
+#: arbitrary text on the row ("five_hour", "seven_day_opus").
+_RE_WINDOW = re.compile(r"[a-z][a-z0-9_]{0,39}")
+
+
+@dataclass(frozen=True)
+class UsageLimit:
+    """A spent allowance as one harness reported it.
+
+    ``reset_at`` is when it opens again (epoch seconds), ``None`` when nothing
+    readable named it; ``window`` is the harness's own name for the allowance
+    (claude-agent-acp's ``rateLimitType``), ``""`` when it named none.
+    """
+
+    reset_at: float | None
+    window: str = ""
+
+
+def _rejected_rate_limit(error: object) -> dict[str, Any] | None:
+    """claude-agent-acp's ``data.rateLimit`` when it says the request was refused.
+
+    The adapter fails a turn the CLI stopped on a limit with
+    ``data = {"errorKind": "rate_limit", "rateLimit": <SDKRateLimitInfo>}``. Only a
+    ``status`` of ``rejected`` is a spent allowance: ``allowed_warning`` is a
+    warning, and a ``rate_limit`` kind with no info is a throttle the text decides.
+    """
+    data = error.get("data") if isinstance(error, dict) else None
+    if not isinstance(data, dict) or data.get("errorKind") != "rate_limit":
+        return None
+    info = data.get("rateLimit")
+    if isinstance(info, dict) and info.get("status") == "rejected":
+        return info
+    return None
+
+
+def read_usage_limit(
+    error: object, text: str, *, worded: bool, now: datetime | None = None
+) -> UsageLimit | None:
+    """The usage limit a raw ACP error frame reports, or ``None`` when it reports none.
+
+    A limit is either *worded* (the caller matched the provider's sentence) or a
+    rejected ``rateLimit`` in the frame's structured ``data``. Its reset time comes
+    from that structured ``resetsAt`` (epoch seconds) when it is a number in the
+    same bounds the sentence parser keeps, else from the sentence in *text*. Never
+    raises.
+    """
+    try:
+        info = _rejected_rate_limit(error)
+        if info is None and not worded:
+            return None
+        moment = now if now is not None else datetime.now().astimezone()
+        raw_at = info.get("resetsAt") if info else None
+        at = None
+        if isinstance(raw_at, (int, float)) and not isinstance(raw_at, bool):
+            at = _bounded(float(raw_at), moment)
+        if at is None:
+            at = parse_limit_reset(text, moment)
+        raw_window = info.get("rateLimitType") if info else None
+        window = raw_window if isinstance(raw_window, str) else ""
+        return UsageLimit(at, window if _RE_WINDOW.fullmatch(window) else "")
+    except Exception as exc:  # the error path must never break on a frame it reads
+        logger.warning("usage-limit frame could not be read (%s)", type(exc).__name__)
+        return UsageLimit(None) if worded else None

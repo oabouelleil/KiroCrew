@@ -351,18 +351,28 @@ def _terminal_error_meta(exc: BaseException) -> dict[str, object] | None:
 
 
 def _limit_reset_meta(exc: BaseException) -> dict[str, object]:
-    """``reset_at``, the ISO instant a usage limit opens again, for the card to show.
+    """What the error knows of a usage limit beyond its kind, for the row to keep.
 
-    Empty unless the error read one (``AcpError.usage_limit_reset_at``), so a
-    limit row with no readable reset clause keeps exactly ``{"kind": ...}``.
+    ``reset_at``, the ISO instant the limit opens again, for the card to show;
+    ``limit_window``, the harness's own name for the allowance ("five_hour",
+    "seven_day_opus"); and ``harness``, the backend that hit it. Each only when the
+    error read one (``AcpError.usage_limit_reset_at`` / ``usage_limit_window`` /
+    ``usage_limit_harness``), so a limit row that names none keeps exactly
+    ``{"kind": ...}``. The row is the limit's record: anything that reacts to a
+    limit later reads it from there.
     """
+    meta: dict[str, object] = {}
+    for key, attr in (("limit_window", "usage_limit_window"), ("harness", "usage_limit_harness")):
+        value = getattr(exc, attr, "")
+        if isinstance(value, str) and value:
+            meta[key] = value
     at = getattr(exc, "usage_limit_reset_at", None)
     if isinstance(at, bool) or not isinstance(at, (int, float)):
-        return {}
+        return meta
     try:
-        return {"reset_at": datetime.fromtimestamp(at, tz=timezone.utc).isoformat()}
+        return {"reset_at": datetime.fromtimestamp(at, tz=timezone.utc).isoformat(), **meta}
     except (OverflowError, OSError, ValueError):
-        return {}
+        return meta
 
 
 def _kas_signed_out_notice(text: str) -> dict[str, object]:
