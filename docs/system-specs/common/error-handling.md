@@ -326,7 +326,8 @@ Notable terminal (non-retryable) classes:
   covers two vocabularies, because a Claude seat (`claude-agent-acp`) does not go
   through Bedrock and words a spent allowance in Anthropic's terms, not AWS's: the
   window-named limits (`monthly`/`daily`/`weekly`, plus the rolling `session` limit
-  and its `5-hour`/`five-hour` spelling), and the named exceptions
+  and its `5-hour`/`five-hour` spelling, and a model family's own `Opus`/`Sonnet`
+  limit after "hit your"), and the named exceptions
   (`MonthlyLimitError`, `FreeTierLimitExceeded`). The window must be one of those
   NAMED spellings, not any word before "limit", so a genuine "hit your rate limit"
   stays a retryable throttle. The formatter quotes the provider's own sentence
@@ -335,7 +336,13 @@ Notable terminal (non-retryable) classes:
   `rate_limit_error` / HTTP 429 WITHOUT that limit wording is deliberately NOT a
   usage limit: a short-term rate limit clears on its own, so it stays a retryable
   throttle — it is the named-window wording, not the 429, that marks a spent
-  allowance a retry cannot recover.
+  allowance a retry cannot recover. The one structured exception is
+  `claude-agent-acp`'s `data = {"errorKind": "rate_limit", "rateLimit": {...}}`
+  with `rateLimit.status: "rejected"`: that is a spent allowance whatever its
+  wording (`limit_reset.read_usage_limit`). Its `resetsAt` (epoch seconds) is the
+  reset time ahead of the sentence's clause, and its `rateLimitType` rides on the
+  `usage_limit` row as `limit_window`, beside `reset_at` and the `harness` that
+  hit it.
 
 The auth family has exactly ONE transient member, **credential propagation**.
 Bedrock refuses a freshly minted credential with "The security token included in

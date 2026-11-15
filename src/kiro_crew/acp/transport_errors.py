@@ -80,7 +80,7 @@ from kiro_crew.acp.types import (
 )
 from kiro_crew.agent_sdk import host_auth
 from kiro_crew.credential_errors import is_credential_propagation_delay
-from kiro_crew.limit_reset import parse_limit_reset
+from kiro_crew.limit_reset import read_usage_limit
 from kiro_crew.sandbox import (
     LAUNCHER_EXIT_PREFIXES,
     SANDBOX_LAYER_CREW,
@@ -153,10 +153,10 @@ class AcpError(Exception):
         # retry that reproduces the rejection. Terminal like ``auth_required``
         # and, like it, decided from the raw frame rather than the prose.
         self.usage_limit: bool = False
-        # When that limit opens again (epoch seconds), read from the provider's own
-        # "resets ..." clause at raise time. ``None`` when the frame names no clause
-        # :func:`kiro_crew.limit_reset.parse_limit_reset` reads.
+        # When that limit opens again (epoch seconds), its window ("five_hour"; "" when
+        # unnamed) and the harness: :func:`kiro_crew.limit_reset.read_usage_limit`.
         self.usage_limit_reset_at: float | None = None
+        self.usage_limit_window, self.usage_limit_harness = "", ""
         # Structural-rejection tag, set by :func:`_raise_acp_error` when the raw
         # frame says the request shape is deterministic: malformed request, or
         # an unsupported image already embedded in the conversation. Unlike a
@@ -1025,11 +1025,11 @@ def registration_rate_limited_error(base: str, cause: str) -> "AcpRegistrationRa
 # "5-hour" (a.k.a. five-hour) spelling ("5-hour limit reached - resets <time>",
 # "You've hit your session limit · resets <time>"). The reset clause is quoted
 # verbatim by the formatter (_provider_detail), never parsed here. The window
-# must be one of these NAMED spellings, not any word before "limit", so a genuine
-# "hit your rate limit" stays a retryable throttle, not a terminal usage limit.
+# must be one of these NAMED spellings (a model family's own limit only after "hit
+# your"), so a genuine "hit your rate limit" stays a retryable throttle, not a limit.
 _RE_USAGE_LIMIT = re.compile(
     r"\b(?:monthly|daily|weekly|session)\s+(?:usage\s+)?limit\b"
-    r"|\b(?:5|five)[\s-]?hour\s+limit\b"
+    r"|\b(?:5|five)[\s-]?hour\s+limit\b|\bhit\s+your\s+(?:opus|sonnet)\s+limit\b"
     r"|\busage\s+limit\s+has\s+been\s+reached\b"
     r"|\b(?:MonthlyLimitError|FreeTierLimitExceeded)\b",
     re.IGNORECASE,
@@ -1979,16 +1979,15 @@ def _raise_acp_error(
         and not _RE_USAGE_LIMIT.search(raw_data)
     )
     err.auth_required = err.sign_in_needed and backend in ACP_BACKENDS_HOST_AUTH_CALLBACK
-    # Tag a spent plan allowance the same way: from the raw frame, and only when
-    # the formatter reached its usage-limit branch -- an entitlement rejection
+    # Tag a spent plan allowance the same way: from the raw frame (its wording, or
+    # claude-agent-acp's rejected ``rateLimit`` data) -- an entitlement rejection
     # that happens to carry limit wording keeps its own (served-model) remedy.
     # The sign-in tag above already withholds itself for this wording, so the
-    # two tags are exclusive and the row's kind is unambiguous.
-    if _RE_USAGE_LIMIT.search(raw_data) and not _model_is_unentitled(
-        raw_data_field, available_models
-    ):
-        err.usage_limit = True
-        err.usage_limit_reset_at = parse_limit_reset(raw_data)
+    # two tags are exclusive and the row's kind is unambiguous. Terminal either way.
+    limit = read_usage_limit(error, raw_data, worded=bool(_RE_USAGE_LIMIT.search(raw_data)))
+    if limit is not None and not _model_is_unentitled(raw_data_field, available_models):
+        err.usage_limit, err.transient, err.usage_limit_harness = True, False, backend
+        err.usage_limit_reset_at, err.usage_limit_window = limit.reset_at, limit.window
     # A stale-credential answer, read from the structured field (not the prose),
     # recycles the process instead of retrying it. Pinned non-transient: the
     # prose ends in "try again", and a retry would re-ask the one process that
