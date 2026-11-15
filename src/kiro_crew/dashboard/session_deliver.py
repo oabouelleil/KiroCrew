@@ -46,6 +46,10 @@ DELIVERED_STEERED = "steered"
 DELIVERED_REQUEUED = "requeued"
 NOT_DELIVERED = "unavailable"
 QUEUE_FULL = "queue_full"
+#: An automation wake held because the chat waits for a usage limit to reset
+#: (``limit_continue.holds_automation``): nothing was written, and the sender tries
+#: again later as for a busy slot.
+HELD = "held"
 
 
 @dataclass(frozen=True)
@@ -164,6 +168,8 @@ async def deliver(
     returns ``await start_turn()`` as is (the starter's own answer, not a
     ``DELIVERED_*`` value; *text* is unused), and a running slot returns
     :data:`NOT_DELIVERED` with nothing written, so the sender may steer it instead.
+    An idle slot that waits for a usage limit to reset returns :data:`HELD` with
+    nothing written and the starter not run.
     An idle automation wake without one returns :data:`NOT_DELIVERED`.
 
     *admission* is the containment snapshot the caller's gate held: the steer
@@ -178,7 +184,11 @@ async def deliver(
     if origin.kind == ORIGIN_PEER:
         return await _deliver_peer(state, slot, text, origin, admission, queue_meta, relay_meta)
     if origin.kind == ORIGIN_AUTOMATION and start_turn is not None:
-        return NOT_DELIVERED if slot.running else await start_turn()
+        if slot.running:
+            return NOT_DELIVERED
+        from kiro_crew.dashboard import limit_continue
+
+        return HELD if limit_continue.holds_automation(slot) else await start_turn()
     if slot.running:
         return await _deliver_running(state, slot, text, origin, admission, evict_oldest)
     if origin.kind == ORIGIN_AUTOMATION:

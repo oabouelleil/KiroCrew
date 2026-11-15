@@ -478,14 +478,14 @@ class TestSpawnFailover:
             {"enabled": False, "chain": ["pi", "claude"]},
             # A repeated name makes the block invalid, so it reads as off.
             {"enabled": True, "chain": ["pi", "kas", "pi", "claude"]},
-            # Phase 2 triggers are refused, so the block reads as off.
+            # usage_limit is the chat's trigger: a spawn refusal is never one.
             {"enabled": True, "chain": ["pi", "claude"], "triggers": ["usage_limit"]},
             # The refusal is backend_not_installed; only restart is a trigger.
             {"enabled": True, "chain": ["pi", "claude"], "triggers": ["backend_restart_required"]},
             # Every later member is unavailable: exhausted, never Kiro.
             {"enabled": True, "chain": ["pi", "kas"]},
         ],
-        ids=["disabled", "repeated-name", "phase2-trigger", "trigger-omitted", "exhausted"],
+        ids=["disabled", "repeated-name", "chat-trigger", "trigger-omitted", "exhausted"],
     )
     async def test_no_hop_keeps_the_typed_refusal(self, selectable, monkeypatch, block):
         from kiro_crew.dashboard.handlers.messaging import api_spawn

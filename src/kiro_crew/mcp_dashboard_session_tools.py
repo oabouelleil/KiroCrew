@@ -32,6 +32,7 @@ from kiro_crew.mcp_dashboard_session_runs import (
     _run_session_retry,
     _run_session_revive,
     _run_session_send,
+    _run_session_set_backend,
     _run_session_set_color,
     _run_session_set_model,
     _run_session_set_note,
@@ -420,6 +421,43 @@ def _session_tools() -> tuple[Tool, ...]:
             run=_run_session_set_model,
             identity="strict",
             routes=("POST /api/session-control/set-model",),
+        ),
+        Tool(
+            name="session_set_backend",
+            description=(
+                "Move another session onto another harness (agent backend), e.g. from "
+                "Claude Code to Codex or Kiro, keeping the same chat. The switch happens "
+                "now: the session is reset, and its next turn starts on the new harness "
+                "with the conversation so far replayed to it. The model pick is kept and "
+                "used where the new harness serves it, otherwise that harness's default "
+                "runs. Only an IDLE session can be switched: a turn or sub-agents in "
+                "flight fail with nothing changed; stop the target with session_stop "
+                "first, then retry. Reaches the same sessions session_set_model does. "
+                "Refused for a session whose harness its channel, schedule, workflow or "
+                "Bot sets, and while the Agent Harness feature preview is off. A harness "
+                "that is unknown, not allowed or not installed here is refused, and the "
+                "refusal lists the ones that can start."
+            ),
+            schema={
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Session key from list_sessions, or its exact title.",
+                    },
+                    "backend": {
+                        "type": "string",
+                        "description": (
+                            "Harness to move to, as session_create's `backend` takes it, "
+                            "e.g. 'kiro', 'claude', 'codex'."
+                        ),
+                    },
+                },
+                "required": ["target", "backend"],
+            },
+            run=_run_session_set_backend,
+            identity="strict",
+            routes=("POST /api/session-control/set-backend",),
         ),
         Tool(
             name="session_reload",

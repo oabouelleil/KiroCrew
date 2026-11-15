@@ -17,7 +17,10 @@ from a small record apart from the wait, so a Cancel that reaches the gateway af
 wait ended still learns the continue went ahead. A message typed meanwhile, a
 closed chat, a turn already running, a conductor mode "Pause all" holding the
 chat, a relay archive or a gateway shutting down makes it do nothing. Nothing is
-armed unless a person presses the button.
+armed unless a person presses the button. Meanwhile the gateway's own wakes into
+the chat are held (:func:`holds_automation`), so a loop's turn cannot hit the same
+limit and end the wait. Moving the chat to another harness instead
+(:mod:`kiro_crew.dashboard.limit_switch`) cancels the wait.
 
 The wait is a timer in the running gateway. A restart drops it and the row keeps
 ``reset_at``, so the card offers the button again. The wait holds the chat only
@@ -126,22 +129,37 @@ def _instant(raw: object) -> float | None:
     return moment.timestamp() if moment.tzinfo is not None else None
 
 
-def limit_reset_of(messages: list[dict]) -> float | None:
-    """When the limit the chat ends on resets (epoch seconds), else ``None``.
+def _last_limit_meta(messages: list[dict]) -> dict[str, Any] | None:
+    """The meta of the usage-limit row the chat ends on, else ``None``.
 
-    Walks back to the newest ``error`` row. It counts only when it is a usage-limit
-    row naming a readable ``reset_at``; a user or assistant row with content first
-    means the chat moved on.
+    Walks back to the newest ``error`` row, which counts only when it is a
+    usage-limit row; a user or assistant row with content first means the chat
+    moved on.
     """
     for m in reversed(messages):
         role = m.get("role")
         raw = m.get("meta")
         meta: dict[str, Any] = raw if isinstance(raw, dict) else {}
         if role == "error":
-            return _instant(meta.get("reset_at")) if meta.get("kind") == USAGE_LIMIT_KIND else None
+            return meta if meta.get("kind") == USAGE_LIMIT_KIND else None
         if role in ("user", "assistant") and m.get("content"):
             return None
     return None
+
+
+def ends_on_usage_limit(messages: list[dict]) -> bool:
+    """Whether the chat ends on a usage-limit row, whether or not it names a reset."""
+    return _last_limit_meta(messages) is not None
+
+
+def limit_reset_of(messages: list[dict]) -> float | None:
+    """When the limit the chat ends on resets (epoch seconds), else ``None``.
+
+    ``None`` too when the usage-limit row the chat ends on names no readable
+    ``reset_at`` (see :func:`ends_on_usage_limit`).
+    """
+    meta = _last_limit_meta(messages)
+    return None if meta is None else _instant(meta.get("reset_at"))
 
 
 def cancel(slot_key: str) -> bool:
@@ -207,6 +225,27 @@ async def cancel_all(_app: web.Application | None = None) -> None:
     if firing:
         await asyncio.gather(*firing, return_exceptions=True)
     _STARTED.clear()
+
+
+def holds_automation(slot: Any) -> bool:
+    """Whether a wake the gateway sends into *slot* on its own waits for the limit.
+
+    True while a wait is armed on the row the chat still ends on and its continue
+    is not yet queued (including the margin after the reset), and while the chat
+    ends on a usage-limit row whose reset, plus the same margin, is still ahead,
+    armed or not: a turn
+    started then is refused by the same limit, and its new limit row would end
+    the person's wait. A held wake writes nothing and is tried again later, so the
+    wait survives it. A message the person types is not a wake and is never held.
+    """
+    messages = getattr(slot, "messages", None)
+    if not isinstance(messages, list):
+        return False
+    armed = _ARMED.get(getattr(slot, "key", ""))
+    if armed is not None and not armed.queued and armed.holds(slot):
+        return True
+    reset_at = limit_reset_of(messages)
+    return reset_at is not None and reset_at + RESUME_MARGIN_SECS > time.time()
 
 
 def armed_resume_iso(slot: Any) -> str | None:

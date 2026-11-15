@@ -32,6 +32,10 @@ _SESSION_RELOAD_ERROR_MAX_CHARS = 500
 #: The boundary row a mid-conversation agent, model, reasoning-effort or
 #: workspace switch leaves when it resets the slot's agent session.
 SESSION_SWITCH_KIND = "session_switch"
+#: ``meta`` key on a harness switch's boundary row naming why it switched, when it
+#: was not a plain pick: ``"usage_limit"`` for a chat moved off a spent allowance
+#: (``dashboard.limit_switch``).
+SESSION_SWITCH_REASON_KEY = "switch_reason"
 #: A Shared Crew notice naming who replaced a preference or lessons
 #: (``shared_crew.memory_changes.NOTICE_KIND``).
 MEMORY_CHANGE_KIND = "memory_change"
@@ -76,6 +80,15 @@ _SESSION_SWITCH_TEXT: dict[str, str] = {
         "Reasoning effort switched to {value}. Replies from here on use the new reasoning effort."
     ),
     "workspace": "Workspace switched to {value}. Replies from here on use the new workspace.",
+    "backend": (
+        "Harness switched to {value}. The conversation so far is replayed to it "
+        "with your next message."
+    ),
+    # The usage-limit switch continues the chat at once, so no "next message".
+    "backend_usage_limit": (
+        "Usage limit reached, so the harness switched to {value}. The conversation "
+        "so far is replayed to it, and the chat continues there."
+    ),
 }
 
 _SWITCH_VALUE_MAX = 80

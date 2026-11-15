@@ -41,6 +41,7 @@ import RecoveryCard, { opensTurn, resolveInjectCard } from './RecoveryCard'
 import { SystemNoticeRow, isSystemNoticeRow } from './CompactionCard'
 import SkillLoadCard, { isSkillLoadRow } from './SkillLoadCard'
 import { ErrorCard, SESSION_START_REPEAT_REFUSAL_AT, capabilityRefusal, isAppAgentRefused, isAuthRequired, isContextOverflow, isImageRepair, isKiroCliMissing, isModelUnentitled, isSessionStartFailed, isTurnTimeout, isUsageLimit, sessionStartFailureStreak, type CapabilityFix, type FreshSessionState, type RepairImagesState } from './ErrorCard'
+import { chatEndsOnRow } from './LimitSwitchRow'
 import { isFeatureRequestRow } from '../../prompts/featureRequest'
 import { feedbackTracker } from '../../feedbackTracker'
 import NoticeCard from './NoticeCard'
@@ -872,6 +873,8 @@ export function createTranscriptRenderers(
             // where Resume itself could run, so never on a relay archive
             // (`continuable` is false there), and keeps Cancel while one is held.
             limitContinueSlot={isUsageLimit(m) && newest ? o.slot : undefined}
+            // Only while the chat still ends on this row, where the switch route acts.
+            limitSwitchSlot={isUsageLimit(m) && newest && chatEndsOnRow(ctx.messages, ctx.index) ? o.slot : undefined}
             kiroCliMissing={featureRequestFormUrl ? isKiroCliMissing(m) : undefined}
             onOpenCapabilities={openCapabilities}
             onOpenTurnLimit={isTurnTimeout(m) ? o.onOpenTurnLimit : undefined}

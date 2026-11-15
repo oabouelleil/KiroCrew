@@ -12,7 +12,8 @@ owner modules. Two halves:
 
 - **Session control** — `session_create`, `session_fork`, `session_send`,
   `session_read_message`, `session_summary`, `session_queue`, `session_stop`, `session_end_wait`, `session_retry`,
-  `session_continue`, `session_set_model`, `session_reload`, `session_rename`, `session_generate_title`,
+  `session_continue`, `session_set_model`, `session_set_backend`, `session_reload`, `session_rename`,
+  `session_generate_title`,
   `session_set_color`, `session_set_note`, `session_close`, `session_revive`, `session_history_list`,
   `session_broadcast`,
   `session_status`, `session_adopt`, `session_handoff`, `session_release`,
@@ -567,8 +568,8 @@ conductor.
 
 Only the target's current manager may hand it over (the session that created it,
 until a handoff names another), and `to` must be a session you manage too. Who
-CREATED the target does not change, so `session_fork`, `session_rename` and
-`session_set_model` stay with the creator, and the new manager cannot open
+CREATED the target does not change, so `session_fork`, `session_rename`,
+`session_set_model` and `session_set_backend` stay with the creator, and the new manager cannot open
 sessions against the creator's memory. The target moves under `to` in the
 sidebar, and its transcript gets one note saying who manages it now.
 
@@ -715,6 +716,49 @@ checked. The tool never stops anything itself. To force the change, call
 Also refused: `auto` and `Auto (decision model)` (`model_owner_only`), because with the Jev
 preview on a slot on `auto` hands each turn's model to Jev routing, which only the
 owner may arm; and a read-only relay archive (`relay_archive_read_only`).
+
+### `session_set_backend`
+
+| Argument | Required | Meaning |
+|---|---|---|
+| `target` | yes | Session key or exact title |
+| `backend` | yes | Harness to move to, spelled as `session_create`'s `backend` takes it: `kiro`, `claude`, `codex`, ... |
+
+Moves another session onto another harness, the same switch as the Harness row in
+that chat's model picker. It reaches the sessions `session_set_model` reaches, and
+never the caller itself. A conductor uses it to move a worker it created.
+
+The switch happens now, not at the target's next turn: the pick is stored on the
+session, the session is reset, and its transcript gets a "Harness switched to"
+row. The next turn starts on the new harness, and the conversation so far is
+replayed to it. The model pick stays on the session: the new harness runs it when
+it serves that model and its own default otherwise, and the pick applies again on
+switching back. The new harness survives a gateway restart.
+
+Only an idle session is switched. A turn in flight (`turn_in_flight`) or attached
+sub-agents (`slot_subagents_running`) refuse it with nothing changed; to force it,
+call `session_stop`, then retry once the target is idle. The permission check runs
+again right before the switch is stored, and before a declined reset is retried, so
+a target that became mirrored or otherwise out of reach meanwhile is refused with
+that check's own code (for example `mirrored_target`) and keeps its harness.
+
+Also refused, with nothing changed:
+
+- a harness that is unknown, not allowed by policy or not installed here
+  (`unknown_backend`, `backend_not_installed`, `backend_restart_required`); the
+  message lists the harnesses that can start. Failover is never walked, because
+  the caller named the harness;
+- an empty name (`invalid_backend`);
+- a session whose harness its channel, schedule, workflow or Bot sets: a linked
+  tab is refused by the permission check (`linked_session_target`, or
+  `unattended_target` for a scheduled run's own session), and a member DM, a Bot's
+  own worker or a channel-driven session by the switch
+  (`harness_switch_unsupported`);
+- any call while the feature preview `dashboard.feature_previews.session_harness`
+  is off (code session_harness_preview_off, HTTP 403), checked before anything
+  else. The tool is not listed then.
+
+A target already on the named harness keeps its session and answers success.
 
 ### `session_reload`
 
@@ -1208,6 +1252,7 @@ gateway-issued key counts. Refusals you should expect, by code:
 | `model_owner_only` | HTTP 403: `auto` and **Auto (decision model)** can only be picked by the owner from the model picker |
 | `model_rejected` | The model id is missing, malformed, looks like a credential, or is one the target's backend would refuse |
 | `effort_rejected` | session_create or session_set_model: `reasoning_effort` is not one of the five standard levels (low, medium, high, xhigh, max). On session_set_model `""` is refused too; set it from the target's effort dropdown |
+| `invalid_backend` / `set_backend_failed` | session_set_backend: no harness name was given, or the switch failed before the session was reset (HTTP 500); nothing was changed. Its other refusals keep the harness switch's own codes, listed under session_set_backend above |
 | `target_replaced` | HTTP 409: the target was replaced by another session under the same key while the call ran (or, for title generation, closed); nothing was changed. Try again |
 | `title_rate_limited` | HTTP 429, title generation only: that target's title was generated less than 5 minutes ago |
 | `invalid_field_type` | An argument had the wrong type (for example a broadcast target list that is not a list of strings) |

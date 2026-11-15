@@ -180,6 +180,7 @@ POST /api/session-control/end-wait api_session_control_end_wait
 POST /api/session-control/retry api_session_control_retry
 POST /api/session-control/continue api_session_control_continue
 POST /api/session-control/set-model api_session_control_set_model
+POST /api/session-control/set-backend api_session_control_set_backend
 POST /api/session-control/set-color api_session_control_set_color
 POST /api/session-control/set-note api_session_control_set_note
 POST /api/session-control/reload api_session_control_reload

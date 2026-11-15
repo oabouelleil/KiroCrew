@@ -289,15 +289,19 @@ class AgentConfig:
         default_factory=dict,
         metadata=_meta(
             "ACP backend failover",
-            "Opt-in, off-by-default policy that starts a sub-agent on another "
-            "backend when the one it asked for cannot start. An object with "
-            "'enabled' (bool), 'chain' (ordered list of distinct backend names, "
-            "spelled as spawn_run spells them, e.g. 'codex', 'claude', 'kiro') "
-            "and optional 'triggers' (which refusals cause a hop: "
-            "backend_not_installed, backend_restart_required; both when omitted). "
+            "Opt-in, off-by-default policy that moves work to another backend. An "
+            "object with 'enabled' (bool), 'chain' (ordered list of distinct backend "
+            "names, spelled as spawn_run spells them, e.g. 'codex', 'claude', 'kiro') "
+            "and optional 'triggers' (backend_not_installed and "
+            "backend_restart_required, the default, start a sub-agent on a later "
+            "member when the one it asked for cannot start; usage_limit, only when "
+            "named, moves a dashboard chat that stopped on a usage limit to the "
+            "next member and continues it, with the Agent Harness feature preview "
+            "on, at most once per message a person sends the chat). "
             "A hop only goes to a later chain member that can start, never a "
-            "silent Kiro fallback, and the spawn result names the backend that "
-            "ran and the one it replaced. A hop moves the prompt and its context "
+            "silent Kiro fallback. The spawn result names the backend that ran "
+            "and the one it replaced; a moved chat gets a row naming the harness "
+            "it moved to. A hop moves the prompt and its context "
             "to that backend's vendor and bill. A name that is not selectable is "
             "skipped. Absent means no failover.",
             # No enum: 'chain' names selectable backends, whose live set comes

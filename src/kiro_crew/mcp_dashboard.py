@@ -794,6 +794,7 @@ from kiro_crew.mcp_dashboard_session_runs import (  # noqa: E402, F401
     _run_session_retry,
     _run_session_revive,
     _run_session_send,
+    _run_session_set_backend,
     _run_session_set_color,
     _run_session_set_model,
     _run_session_set_note,
@@ -863,8 +864,8 @@ def _list_tools() -> list[dict[str, Any]]:
     the assignment already happened; there is nothing left to gate here. The one
     conditional parts are the ``crew`` argument on the five session tools, which is
     advertised only while ``work_ledger.remote_dispatch`` is on, and ``backend`` on
-    ``session_create`` / ``work_dispatch``, only while the ``session_harness``
-    feature preview is on.
+    ``session_create`` / ``work_dispatch`` and the ``session_set_backend`` tool, only
+    while the ``session_harness`` feature preview is on.
     """
     from kiro_crew.mcp_session_crew import with_crew_schema
     from kiro_crew.remote_dispatch import remote_dispatch_enabled

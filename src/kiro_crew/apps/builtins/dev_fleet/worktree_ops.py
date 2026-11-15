@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kiro_crew import _facade_mirror, executors
-from kiro_crew.apps.builtins.dev_fleet import fleet_state, repository, runtime
+from kiro_crew.apps.builtins.dev_fleet import fleet_state, jj_workspaces, repository, runtime
 from kiro_crew.apps.builtins.dev_fleet.worktree_ops_pods import _wt_lock
 from kiro_crew.apps.builtins.dev_fleet.worktree_ops_removal import _worktree_remove
 from kiro_crew.git_tmp_packs import reap_stale_tmp_packs
@@ -37,7 +37,10 @@ async def _rebase(name: str) -> dict:
 
 async def _rebase_locked(target: dict) -> dict:
     path = target["path"]
-    st = await repository._git(path, "status", "--porcelain")
+    # jj carries working-copy edits through a rebase and undoes a conflicted one
+    # as a whole, so a dirty workspace is not a hazard the way a dirty checkout is.
+    is_jj = jj_workspaces.is_workspace(path)
+    st = "" if is_jj else await repository._git(path, "status", "--porcelain")
     if st is None:
         return {"ok": False, "error": "cannot verify worktree state (git status failed)"}
     if st:
@@ -85,6 +88,8 @@ async def _rebase_locked(target: dict) -> dict:
     # worktree onto a base the positive verdict never checked. Base and remote are one
     # snapshot; the fetch and the rebase use its remote.
     remote = base_remote
+    if is_jj:
+        return await jj_workspaces.rebase(path, remote, base_branch)
     if await repository._git(path, "fetch", remote, base_branch, timeout=90) is None:
         return {"ok": False, "error": f"git fetch {remote} {base_branch} failed"}
     rc, stdout, stderr = await runtime._run_cmd(
@@ -156,7 +161,7 @@ async def _prunable(path: str, branch: str | None, pr_rows: list[dict] | None = 
     """
     # Resolve the full HEAD once so cache invalidation cannot alias distinct
     # commits that share an abbreviated prefix. Reuse it for the merge guard.
-    head_oid = (await repository._git(path, "rev-parse", "HEAD")) if branch else None
+    head_oid = (await repository._head_oid(path)) if branch else None
     pr = (await fleet_state._pr_status_cached(branch, head_oid, pr_rows)) if branch else None
     own = await repository._own_commits_count(path)
     dirty = await repository._real_dirty(path)
@@ -331,7 +336,7 @@ async def _prune_candidates() -> dict:
 
     candidates, kept = [], []
     for w, v in verdicts:
-        name = Path(w["path"]).name
+        name = repository.worktree_name(w["path"])
         row = {"name": name, "code": v["code"], "branch": w.get("branch")}
         if v["ok"]:
             # A closed-PR candidate carries the ancestry warning so the

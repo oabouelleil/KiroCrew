@@ -6604,6 +6604,11 @@
       "job_title": "{{name}} — {{time}} {{tz}}",
       "job_title_paused": "{{name}} (paused) — {{time}} {{tz}}",
       "job_name_paused": "{{name}} (paused)"
+    },
+    "sessionHarnessPicker": {
+      "busy": "Wait for the reply to finish, or stop it, to switch harness.",
+      "hint": "Moves this chat to another agent harness. The conversation so far is replayed to it with your next message.",
+      "label": "Harness"
     }
   },
   "hooks": {

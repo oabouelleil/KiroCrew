@@ -24,19 +24,29 @@ from typing import Sequence
 
 logger = logging.getLogger(__name__)
 
-#: The verdicts a failover chain may react to: the two refusal codes of the
-#: spawn-time probe in ``dashboard/messaging_api/spawn.py``. A spent allowance
-#: (``usage_limit``) or a rejected login (``auth``) surfaces only once a run's
-#: first request reaches the vendor, and nothing in this phase reads them, so
-#: accepting them here would publish a key that does nothing. They join this set
-#: in the same change that adds their consumer. Transient faults (``throttle``,
-#: ``http_5xx``, ``connection``) never belong here: they are the same-backend
-#: retry ladder's job.
-FAILOVER_TRIGGERS: tuple[str, ...] = ("backend_not_installed", "backend_restart_required")
+#: The verdicts a failover chain may react to. The first two are the refusal
+#: codes of the spawn-time probe in ``dashboard/messaging_api/spawn.py``.
+#: ``usage_limit`` is a dashboard chat that stopped on a spent allowance: its
+#: consumer is ``dashboard/limit_switch.py``, which moves the chat to the next
+#: member and continues it; a sub-agent run is never moved by it. A rejected
+#: login (``auth``) surfaces only once a run's first request reaches the vendor,
+#: and nothing reads it yet, so accepting it here would publish a key that does
+#: nothing; it joins this set in the same change that adds its consumer.
+#: Transient faults (``throttle``, ``http_5xx``, ``connection``) never belong
+#: here: they are the same-backend retry ladder's job.
+FAILOVER_TRIGGERS: tuple[str, ...] = (
+    "backend_not_installed",
+    "backend_restart_required",
+    "usage_limit",
+)
+
+#: The triggers of a block that names none. ``usage_limit`` is left out: a block
+#: written before it existed must not start moving chats to another vendor's bill.
+DEFAULT_TRIGGERS: tuple[str, ...] = ("backend_not_installed", "backend_restart_required")
 
 #: Accepted spellings that are not active yet, named in the refusal so an
 #: operator reading the error learns why rather than guessing a typo.
-_NOT_YET_ACTIVE = ("auth", "usage_limit")
+_NOT_YET_ACTIVE = ("auth",)
 
 
 @dataclass(frozen=True)
@@ -65,7 +75,7 @@ class AcpFailoverConfig:
 
         ``chain`` must be a list of distinct non-empty names: a repeated name has
         no defined successor. ``triggers``, when given, must come from
-        :data:`FAILOVER_TRIGGERS`; omitted, it is all of them. Whether a chain
+        :data:`FAILOVER_TRIGGERS`; omitted, it is :data:`DEFAULT_TRIGGERS`. Whether a chain
         name is selectable is NOT checked here (this leaf has no registry
         import, and the selectable set narrows at runtime), and the spawn path
         skips any name that cannot start.
@@ -91,7 +101,7 @@ class AcpFailoverConfig:
 
         raw_triggers = raw.get("triggers")
         if raw_triggers is None:
-            triggers = FAILOVER_TRIGGERS
+            triggers = DEFAULT_TRIGGERS
         else:
             if not isinstance(raw_triggers, list) or any(
                 not isinstance(item, str) for item in raw_triggers

@@ -17,6 +17,7 @@ from kiro_crew.dashboard import (
     chat_threads,
     handlers,
     limit_continue,
+    limit_switch,
     queue_edit_hold,
     session_export,
     session_transfer,
@@ -167,6 +168,10 @@ def register(app: web.Application) -> None:
         limit_continue.api_chat_slot_limit_continue_cancel,
     )
     app.on_cleanup.append(limit_continue.cancel_all)
+    # Move off the usage limit to another harness and continue there.
+    app.router.add_post(
+        "/api/chat/slots/{slot}/limit-switch", limit_switch.api_chat_slot_limit_switch
+    )
     app.router.add_delete(
         "/api/chat/slots/{slot}/queue/{queue_id}", chat.api_chat_slot_queue_cancel
     )
@@ -190,6 +195,7 @@ def register(app: web.Application) -> None:
     # Optimizer
     app.router.add_post("/api/optimizer/optimize", handlers.handle_optimize)
     app.router.add_post("/api/chat/slots/{slot}/model", chat.api_chat_slot_model)
+    app.router.add_post("/api/chat/slots/{slot}/backend", chat.api_chat_slot_backend)
     app.router.add_get("/api/chat/slots/{slot}/autocompact", chat.api_chat_slot_autocompact)
     app.router.add_post("/api/chat/slots/{slot}/autocompact", chat.api_chat_slot_autocompact)
     app.router.add_get("/api/chat/slots/{slot}/turn-timeout", chat.api_chat_slot_turn_timeout)

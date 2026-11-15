@@ -334,6 +334,13 @@ async def _fire_dashboard_nudge(
     )
     if isinstance(outcome, MonitorDispatchResult):
         return _delivery_result(wake_message, outcome)
+    if outcome == session_deliver.HELD:
+        # The chat waits for a usage limit to reset: like a busy slot, the wake
+        # spends no cycle and is tried again, so the person's wait is not ended.
+        logger.info(
+            "AutoNudge hold: slot %s waits for its usage limit (loop %s)", slot.key, loop.id
+        )
+        return _delivery_result(wake_message, MonitorDispatchResult.BUSY)
     # Turn still active. A work-ledger wake goes INTO that turn rather than
     # waiting it out: its payload is a line naming the item that moved plus a
     # line saying where to read it, and a conductor told a worker finished

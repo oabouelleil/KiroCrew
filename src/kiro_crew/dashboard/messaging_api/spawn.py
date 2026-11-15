@@ -221,6 +221,27 @@ def _chain_note(tried: tuple[str, ...]) -> str:
     return f"; agent.acp_failover also tried {list(tried)}, and none can start" if tried else ""
 
 
+async def _startable_backends() -> tuple[list[str], dict[str, Any]]:
+    """The selectable backends this machine can start now, and every selectable one's probe.
+
+    A backend can start when governance allows it AND it is installed
+    (``probe_backend``; a probe that could not decide does not block) and needs
+    no restart.
+    """
+    from kiro_crew.acp_backends import selectable_backend_values
+    from kiro_crew.agent_sdk.backend_install import MISSING, probe_backend
+
+    selectable = selectable_backend_values()
+    # Off the loop: a probe shells out and walks the filesystem (cached briefly).
+    states = await asyncio.to_thread(lambda: {b: probe_backend(b) for b in selectable})
+    # Installed after the gateway started (``restart_required``): the gateway
+    # still holds the cached absence, so a start now would fail like a missing one.
+    available = [
+        b for b in selectable if states[b].installed != MISSING and not states[b].restart_required
+    ]
+    return available, states
+
+
 def _inherited_backend_name(parent_session: object, *, member: bool) -> str:
     """The harness a spawn with no ``backend`` of its own inherits from its parent, or ``""``.
 
@@ -241,8 +262,14 @@ def _inherited_backend_name(parent_session: object, *, member: bool) -> str:
 
 async def _requested_backend(
     raw: object,
+    *,
+    failover: bool = True,
 ) -> tuple[str | None, str | None, web.Response | None]:
     """The backend a spawn starts on, the name it replaced, or the refusal.
+
+    ``failover=False`` never walks ``agent.acp_failover``: a backend that cannot
+    start is refused, for a caller that a person named the backend for (the
+    chat's harness switch).
 
     ``(None, None, None)`` when the request names none: the run starts on the
     gateway default exactly as before. The middle value is the requested name
@@ -259,20 +286,12 @@ async def _requested_backend(
     this parameter exists to rule out. The refusal lists only what can start, so
     an agent's retry picks a backend that works.
     """
-    from kiro_crew.acp_backends import POLICY_ID_BY_BACKEND, selectable_backend_values
-    from kiro_crew.agent_sdk.backend_install import MISSING, probe_backend
+    from kiro_crew.acp_backends import POLICY_ID_BY_BACKEND
 
     if raw is None or raw == "":
         return None, None, None
     by_name = {name: backend for backend, name in POLICY_ID_BY_BACKEND.items()}
-    selectable = selectable_backend_values()
-    # Off the loop: a probe shells out and walks the filesystem (cached briefly).
-    states = await asyncio.to_thread(lambda: {b: probe_backend(b) for b in selectable})
-    # Installed after the gateway started (``restart_required``): the gateway
-    # still holds the cached absence, so a start now would fail like a missing one.
-    available = [
-        b for b in selectable if states[b].installed != MISSING and not states[b].restart_required
-    ]
+    available, states = await _startable_backends()
     names = sorted(POLICY_ID_BY_BACKEND.get(b, b) for b in available)
     backend = by_name.get(raw) if isinstance(raw, str) else None
     if backend is not None and backend in available:
@@ -298,7 +317,7 @@ async def _requested_backend(
     # and names this refusal as a trigger, may start a later member instead. The
     # caller is told (see ``api_spawn``), because the prompt then goes to another
     # vendor.
-    hop, tried = await _failover_backend(raw, code, available)
+    hop, tried = await _failover_backend(raw, code, available) if failover else (None, ())
     if hop is not None:
         return hop, raw, None
     chain_note = _chain_note(tried)

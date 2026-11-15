@@ -13,6 +13,7 @@ import { i18nT } from '../../i18n/t'
 import { useLanguageGeneration } from '../../i18n/useLanguageGeneration'
 import { chatErrorDisplayText } from '../../lib/chatErrorRecovery'
 import { LimitContinueRow } from './LimitContinueRow'
+import { LimitSwitchRow } from './LimitSwitchRow'
 import { isStopEvent } from '../../lib/stopEvent'
 import { isSystemNoticeKind } from '../../lib/systemNotice'
 import type { ChatMessage } from '../../types'
@@ -364,6 +365,12 @@ export interface ErrorCardProps {
    */
   limitContinueSlot?: string
   /**
+   * The chat this card's usage-limit row belongs to, while it is the chat's newest
+   * error row and nothing has answered after it. On a card that can be resumed, it
+   * adds "Switch to <harness> and continue" (see `LimitSwitchRow`).
+   */
+  limitSwitchSlot?: string
+  /**
    * Set beside `featureRequestFormUrl` when the row is a `kiro_cli_missing`
    * start failure rather than a spent allowance: the same form is offered, and
    * only the hint and the link label change, since the usage-limit copy (no
@@ -643,6 +650,7 @@ export const ErrorCard = memo(function ErrorCard({
   unentitledElsewhere,
   featureRequestFormUrl,
   limitContinueSlot,
+  limitSwitchSlot,
   kiroCliMissing,
   sessionStartRepeat,
   onRestartGateway,
@@ -1121,6 +1129,7 @@ export const ErrorCard = memo(function ErrorCard({
         <LimitContinueRow slot={limitContinueSlot} resetAt={limitIso} time={fmtDateTime(limitAt)}>
           {resumeButton}
         </LimitContinueRow>
+        {limitSwitchSlot && <LimitSwitchRow slot={limitSwitchSlot} />}
       </div>
     )
   }
@@ -1134,6 +1143,7 @@ export const ErrorCard = memo(function ErrorCard({
         {withOriginLink(displayText)}
         <LimitResetLine meta={meta} />
         {limitHeld}
+        {limitSwitchSlot && <LimitSwitchRow slot={limitSwitchSlot} className="mt-2" />}
       </div>
       {resumeButton}
     </div>

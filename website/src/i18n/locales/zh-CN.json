@@ -11186,6 +11186,11 @@
       "staged": "已放进聊天框，请从那里发送。",
       "start": "开始",
       "who": "谁来聊"
+    },
+    "sessionHarnessPicker": {
+      "busy": "请等待回复完成或停止回复，然后再切换运行框架。",
+      "hint": "将此聊天移到另一个代理运行框架。到目前为止的对话会随你的下一条消息重新提供给它。",
+      "label": "运行框架"
     }
   },
   "hooks": {
@@ -12579,6 +12584,7 @@
         "limit_continue_cancel": "取消自动继续",
         "limit_continue_failed": "无法设置自动继续。请重试。",
         "limit_continue_started": "自动继续已经开始，因此未被取消。",
+        "limit_switch": "切换到 {{harness}} 并继续",
         "feature_request_form_cli_missing": "在 GitHub 上提交请求",
         "feature_request_form_cli_missing_hint": "这台电脑未安装 kiro-cli，所以 Kiro 无法回复。请改为在 GitHub 上提交功能请求：表单会在新标签页中打开，需要 GitHub 账号。",
         "session_start_repeat_hint": "代理会话已连续多次启动失败，继续只会再次执行同一次启动。请在终端运行 {{command}} 重启 gateway，然后重新发送消息。",

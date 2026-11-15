@@ -11702,6 +11702,11 @@
       "staged": "Se puso en el cuadro de chat. Envíalo desde allí.",
       "start": "Empezar",
       "who": "Quién participa"
+    },
+    "sessionHarnessPicker": {
+      "busy": "Espera a que termine la respuesta, o detenla, para cambiar de harness.",
+      "hint": "Mueve este chat a otro harness de agente. La conversación hasta ahora se le vuelve a enviar con tu próximo mensaje.",
+      "label": "Harness"
     }
   },
   "hooks": {
@@ -13141,6 +13146,7 @@
         "limit_continue_cancel": "Cancelar la continuación automática",
         "limit_continue_failed": "No se pudo programar la continuación automática. Inténtalo de nuevo.",
         "limit_continue_started": "La continuación automática ya había empezado, así que no se canceló.",
+        "limit_switch": "Cambiar a {{harness}} y continuar",
         "feature_request_form_cli_missing": "Enviar la solicitud en GitHub",
         "feature_request_form_cli_missing_hint": "Kiro no puede responder porque kiro-cli no está instalado en este equipo. Envía tu solicitud en GitHub: el formulario se abre en una pestaña nueva y necesitas una cuenta de GitHub.",
         "session_start_repeat_hint": "La sesión del agente no ha podido iniciarse varias veces seguidas, así que reanudar solo repetiría el mismo inicio. Reinicia el gateway desde un terminal con {{command}} y envía tu mensaje de nuevo.",

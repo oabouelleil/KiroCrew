@@ -362,6 +362,8 @@ class TestWhatThisSetGrants:
         "session_retry",
         "session_continue",
         "session_set_model",
+        # Moves a session onto another harness; same gate as session_set_model.
+        "session_set_backend",
         # Tints only a session the caller created; the route's creator
         # fence is narrower than the rest of this group's.
         "session_set_color",
@@ -402,10 +404,15 @@ class TestWhatThisSetGrants:
 
         assert {t["name"] for t in mcp_dashboard._tool_definitions()} == self.GRANTED_TOOLS
 
-    def test_the_advertised_list_is_the_set(self) -> None:
-        """Reaching the process means the set was assigned; nothing is hidden."""
-        from kiro_crew import mcp_dashboard
+    def test_the_advertised_list_is_the_set(self, monkeypatch) -> None:
+        """Reaching the process means the set was assigned; nothing is hidden but the
+        tools that exist only for the Agent Harness preview, while it is off."""
+        from kiro_crew import mcp_dashboard, session_harness_preview
 
+        monkeypatch.setattr(session_harness_preview, "session_harness_enabled", lambda: False)
+        names = {t["name"] for t in mcp_dashboard._list_tools()}
+        assert names == self.GRANTED_TOOLS - session_harness_preview.PREVIEW_ONLY_TOOLS
+        monkeypatch.setattr(session_harness_preview, "session_harness_enabled", lambda: True)
         assert {t["name"] for t in mcp_dashboard._list_tools()} == self.GRANTED_TOOLS
 
     def test_session_driving_tools_ship_with_the_folder_tools(self) -> None:

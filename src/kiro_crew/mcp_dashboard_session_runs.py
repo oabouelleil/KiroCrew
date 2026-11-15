@@ -641,6 +641,28 @@ def _run_session_set_model(args: dict[str, Any], ctx: ToolContext) -> str:
     return redact(f"\U0001f501 `{target}` will switch to {change} when its next turn starts.")
 
 
+def _run_session_set_backend(args: dict[str, Any], ctx: ToolContext) -> str:
+    try:
+        resp = ctx.client.post(
+            "/api/session-control/set-backend",
+            {"target": args["target"], "backend": args["backend"]},
+            session_key=ctx.caller_key,
+        )
+    except DashboardError as refused:
+        return redact(
+            f"Error: could not change that session's harness: {refused.error} "
+            f"(code `{refused.code}`); nothing changed."
+        )
+    target = resp.get("target", args["target"])
+    text = (
+        f"\U0001f501 `{target}` now runs on {resp.get('harness') or resp.get('backend')}; "
+        "its next turn starts there with the conversation so far."
+    )
+    if resp.get("warning"):
+        text += f" Warning: {resp['warning']}"
+    return redact(text)
+
+
 def _run_session_rename(args: dict[str, Any], ctx: ToolContext) -> str:
     try:
         resp = ctx.client.post(

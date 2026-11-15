@@ -196,6 +196,7 @@ def test_running_and_turn_running_slot_readers_are_enumerated() -> None:
                 ("chat_api/slot_discard.py", "api_chat_slot_discard"),
                 ("chat_api/resume.py", "api_chat_slot_resume"),
                 ("chat_api/session_relaunch.py", "api_chat_slot_workspace"),
+                ("chat_api/slot_harness.py", "switch_slot_harness"),
                 ("chat_api/slot_lifecycle.py", "api_chat_slots_cleanup"),
                 ("chat_api/slot_model.py", "api_chat_slots_model"),
                 ("chat_api/continue_turn.py", "continue_slot_turn"),

@@ -499,6 +499,16 @@ SESSION_SET_MODEL_SCHEMA = ToolSchema(
     custom_validator=_validate_session_set_model,
 )
 
+SESSION_SET_BACKEND_SCHEMA = ToolSchema(
+    tool_name="session_set_backend",
+    fields=[
+        FieldSpec("target", str, required=True, max_len=MAX_SHORT_STRING),
+        # The gateway judges the name against the harnesses that can start here;
+        # this cap only keeps an oversized argument off the wire.
+        FieldSpec("backend", str, required=True, max_len=64),
+    ],
+)
+
 SESSION_RELOAD_SCHEMA = ToolSchema(
     tool_name="session_reload",
     fields=[

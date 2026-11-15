@@ -13,6 +13,7 @@ import logging
 import pytest
 
 from kiro_crew.acp_failover import (
+    DEFAULT_TRIGGERS,
     FAILOVER_TRIGGERS,
     AcpFailoverConfig,
     failover_policy,
@@ -42,9 +43,14 @@ class TestNextFailoverBackend:
     def test_a_verdict_the_policy_omits_does_not_hop(self):
         assert _next("codex", ("codex", "claude"), triggers=("backend_restart_required",)) is None
 
-    @pytest.mark.parametrize("verdict", ["usage_limit", "auth", "throttle", "http_5xx"])
+    @pytest.mark.parametrize("verdict", ["auth", "throttle", "http_5xx"])
     def test_a_verdict_this_phase_does_not_consume_never_hops_even_if_listed(self, verdict):
         assert _next("codex", ("codex", "claude"), verdict=verdict, triggers=(verdict,)) is None
+
+    def test_a_usage_limit_hops_when_listed(self):
+        # The chat's usage-limit switch (dashboard/limit_switch.py) passes it.
+        assert _next("codex", ("codex", "claude"), "usage_limit", ("usage_limit",)) == "claude"
+        assert _next("codex", ("codex", "claude"), "usage_limit", DEFAULT_TRIGGERS) is None
 
 
 class TestFromRaw:
@@ -63,12 +69,26 @@ class TestFromRaw:
             enabled=True, chain=("codex", "kiro"), triggers=("backend_restart_required",)
         )
 
-    def test_omitted_triggers_are_every_active_trigger(self):
+    def test_omitted_triggers_are_the_spawn_time_refusals(self):
+        # A block written before the chat consumer existed must not start moving
+        # chats to another vendor: usage_limit is only ever named.
         cfg = AcpFailoverConfig.from_raw({"enabled": True, "chain": ["codex", "claude"]})
-        assert cfg.triggers == FAILOVER_TRIGGERS
+        assert cfg.triggers == DEFAULT_TRIGGERS
+        assert "usage_limit" not in cfg.triggers
 
-    def test_only_the_spawn_time_refusals_are_triggers_in_this_phase(self):
-        assert set(FAILOVER_TRIGGERS) == {"backend_not_installed", "backend_restart_required"}
+    def test_the_active_triggers(self):
+        assert set(FAILOVER_TRIGGERS) == {
+            "backend_not_installed",
+            "backend_restart_required",
+            "usage_limit",
+        }
+        assert set(DEFAULT_TRIGGERS) == {"backend_not_installed", "backend_restart_required"}
+
+    def test_a_named_usage_limit_trigger_parses(self):
+        cfg = AcpFailoverConfig.from_raw(
+            {"enabled": True, "chain": ["claude", "codex"], "triggers": ["usage_limit"]}
+        )
+        assert cfg.triggers == ("usage_limit",)
 
     @pytest.mark.parametrize("bad", [[], "codex", 3, True])
     def test_a_non_object_block_is_rejected(self, bad):
@@ -88,10 +108,9 @@ class TestFromRaw:
         with pytest.raises(ValueError, match="more than once"):
             AcpFailoverConfig.from_raw({"enabled": True, "chain": ["pi", "claude", "pi"]})
 
-    @pytest.mark.parametrize("trigger", ["usage_limit", "auth"])
-    def test_a_phase_two_trigger_is_rejected_as_not_active(self, trigger):
+    def test_a_trigger_with_no_consumer_is_rejected_as_not_active(self):
         with pytest.raises(ValueError, match="not active yet"):
-            AcpFailoverConfig.from_raw({"enabled": True, "chain": ["codex"], "triggers": [trigger]})
+            AcpFailoverConfig.from_raw({"enabled": True, "chain": ["codex"], "triggers": ["auth"]})
 
     @pytest.mark.parametrize("trigger", ["throttle", "http_5xx", "connection", "retryable"])
     def test_a_transient_trigger_is_rejected(self, trigger):
@@ -150,7 +169,7 @@ class TestNormalizeAcpFailover:
         "block",
         [
             {"enabled": True, "chain": ["pi", "pi"]},
-            {"enabled": True, "chain": ["pi"], "triggers": ["usage_limit"]},
+            {"enabled": True, "chain": ["pi"], "triggers": ["auth"]},
             {"enabled": "true", "chain": ["pi"]},
         ],
         ids=["repeated-name", "phase2-trigger", "string-enabled"],

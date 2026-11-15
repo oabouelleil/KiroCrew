@@ -62,7 +62,9 @@ if TYPE_CHECKING:
     )
 
 
-async def _append_session_switch_notice(slot: _ChatSlot, switch: str, value: str) -> None:
+async def _append_session_switch_notice(
+    slot: _ChatSlot, switch: str, value: str, *, meta: dict[str, Any] | None = None
+) -> None:
     """Leave the boundary row a committed, session-resetting switch owes the transcript.
 
     Called by the agent, model, bulk-model, reasoning-effort and workspace
@@ -97,7 +99,7 @@ async def _append_session_switch_notice(slot: _ChatSlot, switch: str, value: str
     from kiro_crew.security import redact
 
     text = redact(text)
-    slot.append("assistant", text, "msg msg-a", meta={"kind": SESSION_SWITCH_KIND})
+    slot.append("assistant", text, "msg msg-a", meta={**(meta or {}), "kind": SESSION_SWITCH_KIND})
 
 
 def clear_slot_model_binding(slot: Any) -> None:

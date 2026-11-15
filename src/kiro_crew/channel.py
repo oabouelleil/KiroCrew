@@ -163,6 +163,9 @@ CHANNEL_AGENT_BLOCKED_TOOLS: tuple[str, ...] = (
     # Changing a session's model decides what the user's next turn there runs
     # on and spends; same containment reason as stop.
     "session_set_model",
+    # Moving a session onto another harness decides what its next turn runs on;
+    # same containment reason as stop.
+    "session_set_backend",
     # Recoloring a session acts on a session the channel agent would name from
     # thread text other people wrote; same containment reason as stop.
     "session_set_color",

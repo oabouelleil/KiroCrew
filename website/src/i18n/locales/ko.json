@@ -11186,6 +11186,11 @@
       "staged": "채팅 입력란에 넣었습니다. 거기서 보내세요.",
       "start": "시작",
       "who": "참여자"
+    },
+    "sessionHarnessPicker": {
+      "busy": "하네스를 바꾸려면 응답이 끝날 때까지 기다리거나 응답을 중지하세요.",
+      "hint": "이 채팅을 다른 에이전트 하네스로 옮깁니다. 지금까지의 대화는 다음 메시지와 함께 새 하네스에 다시 전달됩니다.",
+      "label": "하네스"
     }
   },
   "hooks": {
@@ -12579,6 +12584,7 @@
         "limit_continue_cancel": "자동 이어가기 취소",
         "limit_continue_failed": "자동 이어가기를 설정하지 못했습니다. 다시 시도하세요.",
         "limit_continue_started": "자동 계속이 이미 시작되어 취소되지 않았습니다.",
+        "limit_switch": "{{harness}}(으)로 전환하고 이어서 진행",
         "feature_request_form_cli_missing": "GitHub에 요청 제출",
         "feature_request_form_cli_missing_hint": "이 컴퓨터에 kiro-cli가 설치되어 있지 않아 Kiro가 답할 수 없습니다. 대신 GitHub에 기능 요청을 제출하세요. 양식은 새 탭에서 열리며 GitHub 계정이 필요합니다.",
         "session_start_repeat_hint": "에이전트 세션 시작이 연속으로 여러 번 실패했으므로 재개해도 같은 시작만 반복됩니다. 터미널에서 {{command}} 로 gateway를 재시작한 후 메시지를 다시 보내세요.",

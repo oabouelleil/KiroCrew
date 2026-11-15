@@ -908,6 +908,7 @@ export default function ComposerDockView({
                 ultracode={ultracode}
                 fastMode={fastMode}
                 fastUnavailable={fastUnavailable}
+                harnessSwitch={embedded ? undefined : { busy: composerBusy }}
                 onManageModels={modelPickerConfigured ? undefined : () => {
                   setModelDropdown(false)
                   navigate(settingsPath({ tab: 'chat', sub: 'models', highlight: 'key:dashboard.model_picker_hidden_models' }))
