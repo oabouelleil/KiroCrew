@@ -327,7 +327,7 @@ Notable terminal (non-retryable) classes:
   through Bedrock and words a spent allowance in Anthropic's terms, not AWS's: the
   window-named limits (`monthly`/`daily`/`weekly`, plus the rolling `session` limit
   and its `5-hour`/`five-hour` spelling, and a model family's own `Opus`/`Sonnet`
-  limit after "hit your"), and the named exceptions
+  limit after "hit your"; Codex's bare "You've hit your usage limit"), and the named exceptions
   (`MonthlyLimitError`, `FreeTierLimitExceeded`). The window must be one of those
   NAMED spellings, not any word before "limit", so a genuine "hit your rate limit"
   stays a retryable throttle. The formatter quotes the provider's own sentence
@@ -342,7 +342,10 @@ Notable terminal (non-retryable) classes:
   wording (`limit_reset.read_usage_limit`). Its `resetsAt` (epoch seconds) is the
   reset time ahead of the sentence's clause, and its `rateLimitType` rides on the
   `usage_limit` row as `limit_window`, beside `reset_at` and the `harness` that
-  hit it.
+  hit it. Without it the reset time comes from the sentence
+  (`limit_reset.parse_limit_reset`): Anthropic's "resets ..." clause, or Codex's
+  "try again at 3:45 PM" / "try again at Nov 16th, 2026 9:00 AM" in the host's zone;
+  a form it cannot read leaves the row without a time.
 
 The auth family has exactly ONE transient member, **credential propagation**.
 Bedrock refuses a freshly minted credential with "The security token included in

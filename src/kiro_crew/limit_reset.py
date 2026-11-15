@@ -33,7 +33,14 @@ logger = logging.getLogger(__name__)
 #: is a week; a little over covers a weekly reset read just after it opened.
 MAX_RESET_AHEAD_SECS = 8 * 24 * 3600
 
-_RE_RESET_CLAUSE = re.compile(r"\bresets?\b(?P<tail>[^\n]*)", re.IGNORECASE)
+#: The clause that names when the limit opens: "resets ..." (Anthropic's wording) or
+#: "try again at ..." (Codex's).
+_RE_RESET_CLAUSE = re.compile(r"\b(?:resets?|try\s+again\s+at)\b(?P<tail>[^\n]*)", re.IGNORECASE)
+#: Codex's reset on another day, "Nov 16th, 2026 9:00 AM", in the host's own zone.
+_RE_DATED_CLOCK = re.compile(
+    r"(?P<mon>[A-Z][a-z]{2}) (?P<day>\d{1,2})(?:st|nd|rd|th), (?P<year>\d{4}) "
+    r"(?P<clock>\d{1,2}:\d{2} [AP]M)\b"
+)
 _RE_RELATIVE = re.compile(
     r"\bin\s+(?P<body>(?:\d+\s*(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?)\b\s*"
     r"(?:and\s+|,\s*)?)+)",
@@ -48,11 +55,12 @@ _RE_CLOCK = re.compile(
 # A calendar date ("Nov 15", an ISO date, "11/15") is a form this parser does not read.
 _RE_CALENDAR_DATE = re.compile(
     r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d"
-    r"|\d{4}-\d{2}-\d{2}|\b\d{1,2}/\d{1,2}\b",
+    r"|\d{4}-\d{2}-\d{2}|\b\d{1,2}/\d{1,2}\b|,\s*\d{4}\b",
     re.IGNORECASE,
 )
 _RE_ZONE = re.compile(r"\((?P<zone>[A-Za-z][A-Za-z0-9_+\-]*(?:/[A-Za-z0-9_+\-]+)*)\)")
 _WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
 _RELATIVE_UNIT_SECS = {"d": 86400, "h": 3600, "m": 60}
 
 
@@ -120,14 +128,37 @@ def _clock_at(tail: str, now: datetime) -> datetime | None:
     return when
 
 
+def _dated_at(tail: str) -> float | None:
+    """Epoch seconds of a dated clock time in Codex's form, read in the host's zone.
+
+    Codex writes the month in English whatever the locale, so it is read from a
+    fixed table, not ``strptime``'s locale-bound ``%b``.
+    """
+    found = _RE_DATED_CLOCK.search(tail)
+    if not found or found["mon"].lower() not in _MONTHS:
+        return None
+    month = _MONTHS.index(found["mon"].lower()) + 1
+    hour, minute = (int(part) for part in found["clock"][:-3].split(":"))
+    if not 1 <= hour <= 12 or minute > 59:
+        return None
+    hour = hour % 12 + (12 if found["clock"].endswith("PM") else 0)
+    try:
+        return datetime(int(found["year"]), month, int(found["day"]), hour, minute).timestamp()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def _parse(text: str, moment: datetime) -> float | None:
     clause = _RE_RESET_CLAUSE.search(text)
     if not clause:
         return None
     tail = clause.group("tail")
     relative = _relative_secs(tail)
+    dated = _dated_at(tail) if relative is None else None
     if relative is not None:
         at = moment.timestamp() + relative
+    elif dated is not None:
+        at = dated
     else:
         when = _clock_at(tail, moment)
         if when is None:
