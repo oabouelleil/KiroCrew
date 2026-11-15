@@ -23,7 +23,7 @@ import pytest
 from kiro_crew import limit_reset
 from kiro_crew.acp.client import AcpError
 from kiro_crew.acp.transport_errors import _raise_acp_error, classify_provider_error
-from kiro_crew.acp_backends import ACP_BACKEND_CLAUDE
+from kiro_crew.acp_backends import ACP_BACKEND_CLAUDE, ACP_BACKEND_CODEX
 from kiro_crew.limit_reset import MAX_RESET_AHEAD_SECS, UsageLimit, read_usage_limit
 from kiro_crew.testing.clock import ManualClock
 
@@ -160,3 +160,62 @@ class TestTheRaise:
 )
 def test_the_model_family_limits_are_worded_limits(text, is_limit):
     assert (classify_provider_error(text).kind == "usage_limit") is is_limit
+
+
+class TestCodexWording:
+    """Codex's limit sentences (codex-rs ``UsageLimitReachedError``) are limits too.
+
+    Codex formats the reset in the host's own zone: a clock time on the same day
+    ("Try again at 3:45 PM."), else "Nov 16th, 2026 9:00 AM". The test host runs on
+    UTC (the suite pins it), so a naive wall clock here is UTC.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "You\u2019ve hit your usage limit. Try again at 3:45 PM.",
+            "You've hit your usage limit. Try again later.",
+            "You\u2019ve hit your usage limit for GPT-6. Switch to another model now,"
+            " or try again at Nov 16th, 2026 9:00 AM.",
+        ],
+    )
+    def test_codex_sentences_are_limits(self, text):
+        assert classify_provider_error(text).kind == "usage_limit"
+
+    def test_a_same_day_clock_is_read(self):
+        now = datetime(2026, 11, 15, 12, 0).astimezone()
+        at = limit_reset.parse_limit_reset(
+            "You've hit your usage limit. Try again at 3:45 PM.", now
+        )
+        assert at == datetime(2026, 11, 15, 15, 45).timestamp()
+
+    def test_a_dated_clock_is_read(self):
+        now = datetime(2026, 11, 15, 12, 0).astimezone()
+        text = "You've hit your usage limit, or try again at Nov 16th, 2026 9:00 AM."
+        assert limit_reset.parse_limit_reset(text, now) == datetime(2026, 11, 16, 9, 0).timestamp()
+
+    @pytest.mark.parametrize(
+        "tail",
+        [
+            "Try again later.",
+            "try again at Foo 16th, 2026 9:00 AM.",
+            "try again at Feb 30th, 2026 9:00 AM.",
+            "try again at Nov 14th, 2026 9:00 AM.",  # already past
+        ],
+    )
+    def test_anything_else_has_no_time(self, tail):
+        now = datetime(2026, 11, 15, 12, 0).astimezone()
+        assert limit_reset.parse_limit_reset(f"You've hit your usage limit. {tail}", now) is None
+
+    def test_the_raised_codex_error_carries_the_time(self, clock):
+        exc = _raised(
+            {
+                "code": -32603,
+                "message": "Internal error",
+                "data": {"message": "You've hit your usage limit. Try again at 11:59 PM."},
+            },
+            backend=ACP_BACKEND_CODEX,
+        )
+        assert exc.usage_limit is True
+        assert exc.usage_limit_reset_at is not None
+        assert exc.usage_limit_harness == ACP_BACKEND_CODEX

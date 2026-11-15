@@ -1025,12 +1025,12 @@ def registration_rate_limited_error(base: str, cause: str) -> "AcpRegistrationRa
 # "5-hour" (a.k.a. five-hour) spelling ("5-hour limit reached - resets <time>",
 # "You've hit your session limit · resets <time>"). The reset clause is quoted
 # verbatim by the formatter (_provider_detail), never parsed here. The window
-# must be one of these NAMED spellings (a model family's own limit only after "hit
-# your"), so a genuine "hit your rate limit" stays a retryable throttle, not a limit.
+# must be one of these NAMED spellings (a model family's own limit, or Codex's bare
+# "usage limit", only after "hit your"), so "hit your rate limit" stays a throttle.
 _RE_USAGE_LIMIT = re.compile(
     r"\b(?:monthly|daily|weekly|session)\s+(?:usage\s+)?limit\b"
     r"|\b(?:5|five)[\s-]?hour\s+limit\b|\bhit\s+your\s+(?:opus|sonnet)\s+limit\b"
-    r"|\busage\s+limit\s+has\s+been\s+reached\b"
+    r"|\busage\s+limit\s+has\s+been\s+reached\b|\bhit\s+your\s+usage\s+limit\b"
     r"|\b(?:MonthlyLimitError|FreeTierLimitExceeded)\b",
     re.IGNORECASE,
 )
