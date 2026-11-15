@@ -87,12 +87,30 @@ def _current_harness(provider: object) -> str | None:
     return backend if isinstance(backend, str) else None
 
 
+async def slot_harness_now(state: DashboardState, slot: _ChatSlot) -> str | None:
+    """The runtime backend id *slot* runs: its live session's, else the one its next start uses.
+
+    ``None`` when neither can be read.
+    """
+    from kiro_crew.crewmate_harness import CrewmateHarnessUnavailable
+
+    on_now = _current_harness(state.sessions.get_provider(effective_session_key(slot)))
+    if on_now is not None:
+        return on_now
+    try:
+        return await _configured_backend_for_slot(slot)
+    except CrewmateHarnessUnavailable:
+        return None
+
+
 async def switch_slot_harness(
     state: DashboardState,
     slot: _ChatSlot,
     name: str,
     raw_backend: object,
     caller: SlotAgentSwitchCaller,
+    *,
+    usage_limit: bool = False,
 ) -> web.Response:
     """Move *slot* onto the harness *raw_backend* names. The one entry point for every caller.
 
@@ -103,12 +121,19 @@ async def switch_slot_harness(
     during the awaits is refused at the commit. A chat already on the harness answers 200 and
     keeps its session. Otherwise the pick is committed, the session is reset, and the
     transcript gets a boundary row; a reset a slipped-in turn declines is rolled back.
+
+    *usage_limit* is the usage-limit switch (``dashboard.limit_switch``):
+    a chat already on the harness is refused with ``limit_switch_same_harness``, since
+    staying there only meets the same limit, and the boundary row says why it moved
+    and carries the reason in its meta.
     """
     from kiro_crew import session_harness_preview as harness_preview
     from kiro_crew.agent_sdk.backends import backend_to_stored
-    from kiro_crew.crewmate_harness import CrewmateHarnessUnavailable, harness_label
+    from kiro_crew.crewmate_harness import harness_label
+    from kiro_crew.dashboard.chat_utils import USAGE_LIMIT_KIND
     from kiro_crew.dashboard.handlers import messaging
     from kiro_crew.dashboard.session_control import channel_drives_session
+    from kiro_crew.dashboard.system_notices import SESSION_SWITCH_REASON_KEY
     from kiro_crew.members import (
         is_crewmate_worker_session,
         is_member_session_key,
@@ -158,19 +183,19 @@ async def switch_slot_harness(
                 "harness_switch_unsupported",
                 409,
             )
-        provider = state.sessions.get_provider(session_key)
-        on_now = _current_harness(provider)
-        if on_now is None:
-            try:
-                on_now = await _configured_backend_for_slot(slot)
-            except CrewmateHarnessUnavailable:
-                on_now = None
+        on_now = await slot_harness_now(state, slot)
         if on_now is None:
             # Nothing to roll back to: a refused switch could not restore what ran.
             return _harness_refusal(
                 "the harness this chat runs on cannot be read", "harness_switch_unsupported", 409
             )
         if on_now == target:
+            if usage_limit:
+                return _harness_refusal(
+                    "this chat already runs on that harness, which hit the limit",
+                    "limit_switch_same_harness",
+                    409,
+                )
             denied = _caller_withdrawn(caller)
             if denied is not None:
                 return denied
@@ -254,7 +279,15 @@ async def switch_slot_harness(
                 "slot session was rebound during the switch", "session_rebound", 409
             )
         slot._dirty = True
-        await _append_session_switch_notice(slot, "backend", label)
+        if usage_limit:
+            await _append_session_switch_notice(
+                slot,
+                "backend_usage_limit",
+                label,
+                meta={SESSION_SWITCH_REASON_KEY: USAGE_LIMIT_KIND},
+            )
+        else:
+            await _append_session_switch_notice(slot, "backend", label)
     state.push_slots_update()
     resp: dict = {"ok": True, "backend": stored, "harness": label}
     if teardown_incomplete:

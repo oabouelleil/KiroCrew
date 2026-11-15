@@ -333,6 +333,7 @@ from kiro_crew.dashboard.chat_api.slot_harness import (  # noqa: F401
     _current_harness,
     _harness_refusal,
     api_chat_slot_backend,
+    slot_harness_now,
     switch_slot_harness,
 )
 from kiro_crew.dashboard.chat_api.slot_lifecycle import (  # noqa: F401
