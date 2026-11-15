@@ -237,6 +237,11 @@ async def switch_slot_harness(
                     _rollback()
                     return _harness_refusal("a turn is in flight", "turn_in_flight", 409)
                 # An idle session declined: retry once, as the workspace switch does.
+                # The first reset awaited, so the caller's gate is read again first.
+                denied = _caller_withdrawn(caller)
+                if denied is not None:
+                    _rollback()
+                    return denied
                 reset_ok = await _reset()
                 if reset_ok is None:
                     teardown_incomplete = True

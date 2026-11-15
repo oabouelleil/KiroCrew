@@ -380,6 +380,28 @@ def test_a_caller_whose_gate_closed_is_refused_at_the_commit(world, target):
     assert world.resets == []
 
 
+def test_a_caller_whose_gate_closes_during_a_declined_reset_is_not_retried(world, monkeypatch):
+    """The retry is a second teardown after an await, so the gate is read again
+    first. Mutation guard: retrying without it resets a session the caller lost."""
+    permitted = {"ok": True}
+    calls: list[str] = []
+
+    async def declines(_state, _slot, key, *, switch_kind):
+        calls.append(key)
+        permitted["ok"] = False  # e.g. the target was mirrored meanwhile
+        return False
+
+    monkeypatch.setattr(chat_handlers, "_reset_slot_session_or_warn", declines)
+    caller = _CALLER._replace(still_permitted=lambda: permitted["ok"])
+
+    response = asyncio.run(switch_slot_harness(world.state, world.slot, _SLOT, "codex", caller))
+
+    assert (response.status, json.loads(response.text)["code"]) == (403, "caller_not_permitted")
+    assert calls == [_KEY]
+    assert world.slot.backend == "claude"
+    assert members.session_backend_pick(_KEY) == "claude"
+
+
 def test_the_http_route_switches_and_refuses_another_apps_slot(world):
     """Through the route: the body's ``backend`` reaches the core, and an app token
     on a slot it does not own gets the uniform 404 with nothing changed."""
