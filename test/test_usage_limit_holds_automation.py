@@ -156,7 +156,7 @@ class TestAnArmedWait:
         slot = _limited_slot()
         _arm(slot)
         assert (await _fire(slot))[1] == []
-        # The continue ran: its turn answered, so the chat no longer ends on the limit.
+        # The continue ran and its turn answered, so the chat ends on that answer.
         clock.advance(3600 + limit_continue.RESUME_MARGIN_SECS)
         limit_continue.cancel(KEY)
         slot._turns_started += 1
@@ -187,13 +187,19 @@ class TestNoWaitArmed:
         _arm(slot)
         assert limit_continue.cancel(KEY) is True
         assert (await _fire(slot))[1] == []
-        clock.advance(3601)
+        clock.advance(3600 + limit_continue.RESUME_MARGIN_SECS)
         assert (await _fire(slot))[1] == [slot]
+
+    @pytest.mark.asyncio
+    async def test_the_margin_after_the_reset_is_held_with_no_wait_too(self, clock):
+        slot = _limited_slot()
+        clock.advance(3601)
+        assert (await _fire(slot))[1] == []
 
     @pytest.mark.asyncio
     async def test_a_reset_that_passed_releases_the_wake(self, clock):
         slot = _limited_slot()
-        clock.advance(3601)
+        clock.advance(3600 + limit_continue.RESUME_MARGIN_SECS)
         assert (await _fire(slot))[1] == [slot]
 
     @pytest.mark.asyncio

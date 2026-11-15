@@ -216,7 +216,8 @@ def holds_automation(slot: Any) -> bool:
 
     True while a wait is armed on the row the chat still ends on and its continue
     is not yet queued (including the margin after the reset), and while the chat
-    ends on a usage-limit row whose reset is still ahead, armed or not: a turn
+    ends on a usage-limit row whose reset, plus the same margin, is still ahead,
+    armed or not: a turn
     started then is refused by the same limit, and its new limit row would end
     the person's wait. A held wake writes nothing and is tried again later, so the
     wait survives it. A message the person types is not a wake and is never held.
@@ -228,7 +229,7 @@ def holds_automation(slot: Any) -> bool:
     if armed is not None and not armed.queued and armed.holds(slot):
         return True
     reset_at = limit_reset_of(messages)
-    return reset_at is not None and reset_at > time.time()
+    return reset_at is not None and reset_at + RESUME_MARGIN_SECS > time.time()
 
 
 def armed_resume_iso(slot: Any) -> str | None:
