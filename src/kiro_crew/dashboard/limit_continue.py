@@ -19,16 +19,25 @@ closed chat, a turn already running, a conductor mode "Pause all" holding the
 chat, a relay archive or a gateway shutting down makes it do nothing. Nothing is
 armed unless a person presses the button.
 
-The wait is a timer in the running gateway. A restart drops it and the row keeps
-``reset_at``, so the card offers the button again. The wait holds the chat only
-weakly, so a closed chat is not kept alive by it. While a wait is armed the chat's
-slot summary carries ``limit_continue_at`` (the ISO instant it will resume), which
-is how a reloaded card learns it.
+The wait is a timer in the running gateway, and a small record of the armed waits
+(:data:`BOOK_NAME` in the data home) lets it outlive the process: a restart, a crash
+or an applied update stops the timer, and :func:`restore` arms it again at boot,
+after the open-tab restore, for each recorded chat that came back and still ends on
+the same limit row. A reset that passed while the gateway was down continues soon
+after boot. Nothing writes the record before :func:`restore` has read the previous
+one, a stopping gateway leaves it as it is, and an incognito or temporary chat,
+which a restart does not bring back, is never recorded. The record grants nothing a
+chat's own state does not already allow: an entry acts only on a chat that still
+ends on that exact limit row, and does what one press of Resume does, once. The wait
+holds the chat only weakly, so a closed chat is not kept alive by it. While a wait is
+armed the chat's slot summary carries ``limit_continue_at`` (the ISO instant it will
+resume), which is how a reloaded card learns it.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import weakref
@@ -38,6 +47,8 @@ from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
+from kiro_crew.atomic_write import atomic_write
+from kiro_crew.config.paths import data_home
 from kiro_crew.dashboard.chat_utils import USAGE_LIMIT_KIND
 from kiro_crew.dashboard.handlers._shared import require_owner_dashboard_request
 from kiro_crew.dashboard.slot_ownership import slot_not_found
@@ -68,6 +79,13 @@ STARTED_TTL_SECS = 300
 
 #: The most chats whose started continue is remembered at once; the oldest goes first.
 STARTED_CAP = 64
+
+#: The record of armed waits, under the data home, so a restart can arm them again.
+BOOK_NAME = "limit_continue_waits.json"
+
+#: One key and one instant per waiting chat is far below this. A larger file is not
+#: one this module wrote, so it is read as empty rather than in full.
+_BOOK_MAX_BYTES = 64 * 1024
 
 
 @dataclass
@@ -113,6 +131,95 @@ _ARMED: dict[str, _Armed] = {}
 _STARTED: dict[str, _Started] = {}
 # Fire tasks held until done, so a collected task cannot drop a continue.
 _FIRING: set[asyncio.Task[None]] = set()
+#: Set once :func:`restore` has read the previous process's record; until then no
+#: write may replace it.
+_BOOK_TAKEN = False
+
+
+def _book_path() -> Any:
+    return data_home() / BOOK_NAME
+
+
+def _read_book() -> dict[str, float]:
+    """The recorded waits, chat key to reset instant; ``{}`` when absent or damaged."""
+    path = _book_path()
+    try:
+        if path.is_symlink():
+            return {}
+        raw = path.read_bytes()
+    except OSError:
+        return {}
+    if len(raw) > _BOOK_MAX_BYTES:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return {}
+    waits = data.get("waits") if isinstance(data, dict) else None
+    if not isinstance(waits, dict):
+        return {}
+    return {
+        key: float(at)
+        for key, at in waits.items()
+        if isinstance(key, str) and isinstance(at, (int, float)) and not isinstance(at, bool)
+    }
+
+
+def _save() -> None:
+    """Record the armed waits a restart should bring back. Never raises.
+
+    A wait whose turn is queued is done, and a chat a restart does not bring back
+    (incognito, temporary) has nothing to come back to, so neither is recorded.
+    """
+    if not _BOOK_TAKEN:
+        return
+    waits: dict[str, float] = {}
+    for key, armed in _ARMED.items():
+        slot = armed.slot()
+        if armed.queued or slot is None:
+            continue
+        if getattr(slot, "memory_mode", "persistent") != "persistent":
+            continue
+        waits[key] = armed.reset_at
+    try:
+        path = _book_path()
+        if waits:
+            atomic_write(path, json.dumps({"waits": waits}, sort_keys=True))
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("limit-continue: the waits could not be recorded", exc_info=True)
+
+
+def restore(state: DashboardState) -> int:
+    """Arm again the waits the previous process recorded; how many were armed.
+
+    Run once at boot, on the loop, after the open-tab restore. A recorded chat that
+    did not come back, or that ends on anything but a limit row naming that same instant, is
+    dropped. A reset already past continues a margin after it, which is soon.
+    """
+    global _BOOK_TAKEN
+    recorded = _read_book()
+    _BOOK_TAKEN = True
+    count = 0
+    for key, reset_at in recorded.items():
+        slot = state._slots.get(key)
+        if slot is None:
+            continue
+        row_at = limit_reset_of(slot.messages)
+        if row_at is None or abs(row_at - reset_at) >= _SAME_INSTANT_SECS:
+            continue
+        try:
+            arm(state, slot, row_at)
+        except Exception:  # one chat's wait must never stop the boot
+            logger.warning("limit-continue: a wait could not be armed again", exc_info=True)
+            continue
+        count += 1
+    _save()
+    if count:
+        logger.info("limit-continue: armed %d wait(s) again after the restart", count)
+        state.push_slots_update()
+    return count
 
 
 def _instant(raw: object) -> float | None:
@@ -144,12 +251,14 @@ def limit_reset_of(messages: list[dict]) -> float | None:
     return None
 
 
-def cancel(slot_key: str) -> bool:
+def cancel(slot_key: str, *, forget: bool = True) -> bool:
     """Drop the wait armed for *slot_key*; True when there was one and its turn was not queued.
 
     A wait whose continue is already under way stays cancellable until the turn is
     queued: the continue checks ``cancelled`` under the slot's lock just before it
-    queues. Once queued, the wait is left to finish and this answers False.
+    queues. Once queued, the wait is left to finish and this answers False. With
+    *forget* false (a gateway stopping) the record keeps it, so the next boot arms
+    it again.
     """
     armed = _ARMED.get(slot_key)
     if armed is None or armed.queued:
@@ -158,6 +267,8 @@ def cancel(slot_key: str) -> bool:
     armed.cancelled = True
     if armed.handle is not None:
         armed.handle.cancel()
+    if forget:
+        _save()
     return True
 
 
@@ -198,9 +309,12 @@ def started(slot_key: str, slot: Any = None) -> bool:
 
 
 async def cancel_all(_app: web.Application | None = None) -> None:
-    """Drop every wait, and stop a continue already under way: the gateway is shutting down."""
+    """Stop every wait and any continue under way: the gateway is shutting down.
+
+    The record is left as it is, so the next boot arms the same waits again.
+    """
     for key in list(_ARMED):
-        cancel(key)
+        cancel(key, forget=False)
     firing = list(_FIRING)
     for task in firing:
         task.cancel()
@@ -245,6 +359,11 @@ async def _fire(state: DashboardState, armed: _Armed) -> None:
         # so a Cancel that arrives later still hears that it started.
         if _ARMED.get(armed.key) is armed:
             del _ARMED[armed.key]
+            # A stopping gateway keeps a wait it did not queue on record for the next boot.
+            from kiro_crew.dashboard.goal_reminder import gateway_stopping
+
+            if armed.queued or not gateway_stopping():
+                _save()
         slot = armed.slot()
         if armed.queued and slot is not None:
             _remember_started(slot, turns=armed.turns + 1)
@@ -264,6 +383,8 @@ async def _continue(state: DashboardState, armed: _Armed) -> None:
         if not _may_continue(state, armed, slot):
             raise SlotContinueRefusal("the chat moved on", "limit_continue_moved_on")
         armed.queued = True
+        # Off the record before the turn runs, so a crash mid-turn cannot repeat it.
+        _save()
 
     try:
         await continue_slot_turn(
@@ -289,6 +410,7 @@ def _wake(state: DashboardState, armed: _Armed) -> None:
     if slot is None or state._slots.get(armed.key) is not slot:
         # The chat closed or was replaced: nothing is left to continue.
         del _ARMED[armed.key]
+        _save()
         return
     if armed.resume_at > time.time():
         # Not due on the wall clock yet: wait another slice, since a suspended host
@@ -317,6 +439,7 @@ def arm(state: DashboardState, slot: Any, reset_at: float) -> _Armed:
     )
     _schedule(state, armed)
     _ARMED[slot.key] = armed
+    _save()
     return armed
 
 

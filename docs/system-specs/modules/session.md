@@ -723,6 +723,17 @@ crewmate's conductor chat or worker is skipped when its Profile
 (`agents.<name>.approval_mode`, unset read as `trust`, clamped by policy) seeds the
 recorded mode back at its next turn (`crewmate_approval.seed_for_turn`); a Profile that
 seeds less still gets the notice.
+
+**A restart keeps a chat's usage-limit wait** (`dashboard/limit_continue.py`). A
+"continue when the usage limit resets" wait armed from the error card is recorded in
+`limit_continue_waits.json` in the data home (chat key and the limit row's reset
+instant) whenever the set of armed waits changes, but only once this process's boot
+has read the previous record. A stopping gateway stops the timers and leaves the
+record. `_restore_dashboard_sessions` calls `limit_continue.restore` after the
+open-tab restore: each recorded chat that came back still ending on a usage-limit row
+naming that instant is armed again, and every other entry is dropped. A wait is taken
+off the record once its continue is queued, so a crash mid-turn does not repeat it.
+Incognito and temporary chats are never recorded.
 The record grants nothing: no reader turns it back into a mode, and the notice names
 the live chat's own title, so a forged record can at most notify a chat that is open.
 The system row carries `meta.kind = "trust_reset_notice"` and `meta.approval_mode`;

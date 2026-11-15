@@ -95,6 +95,12 @@ async def _restore_dashboard_sessions(state: DashboardState, cfg: KiroCrewConfig
         schedule_member_slot_retry(state)
         await drain_restored_parked_sends(state)
 
+        from kiro_crew.dashboard import limit_continue
+
+        # A "continue when the usage limit resets" wait the previous process held,
+        # armed again now that the chats it names exist.
+        limit_continue.restore(state)
+
         if state._dynamic_cards is not None:
             state._dynamic_cards.seed_open_sessions()
 

@@ -12857,7 +12857,6 @@
         "limit_resets_at": "সীমা {{time}}-এ রিসেট হবে।",
         "limit_continue": "{{time}}-এর পরে নিজে থেকে চালিয়ে যাও",
         "limit_continue_armed": "এই চ্যাট {{time}}-এ একবার নিজে থেকে চলবে। তার আগে বার্তা পাঠালে তা বাতিল হবে।",
-        "limit_continue_cancel": "স্বয়ংক্রিয়ভাবে চালানো বাতিল করো",
         "limit_continue_failed": "স্বয়ংক্রিয়ভাবে চালানো সেট করা যায়নি। আবার চেষ্টা করো।",
         "limit_continue_started": "স্বয়ংক্রিয় চালিয়ে যাওয়া আগেই শুরু হয়ে গিয়েছিল, তাই এটি বাতিল হয়নি।",
         "feature_request_form_cli_missing": "GitHub-এ অনুরোধ জমা দাও",

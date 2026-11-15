@@ -12576,7 +12576,6 @@
         "limit_resets_at": "额度将于 {{time}} 重置。",
         "limit_continue": "在 {{time}} 之后自动继续",
         "limit_continue_armed": "此对话将在 {{time}} 自动继续一次。在此之前发送消息会取消。",
-        "limit_continue_cancel": "取消自动继续",
         "limit_continue_failed": "无法设置自动继续。请重试。",
         "limit_continue_started": "自动继续已经开始，因此未被取消。",
         "feature_request_form_cli_missing": "在 GitHub 上提交请求",

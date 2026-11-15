@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { Loader2, Timer, X } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
 import { api } from '../../api/client'
 import ErrorNotice from '../../components/ErrorNotice'
@@ -14,10 +14,11 @@ const ACTION_BTN =
 
 /**
  * The action row of a usage-limit card that names when the limit resets: the
- * card's own Resume (`children`, when it has one) beside one button that asks the
- * gateway to continue this chat once just after the reset
- * (`POST /api/chat/slots/{slot}/limit-continue`). While that wait is armed the
- * button becomes Cancel and a line says so. At most two buttons share the row.
+ * card's own Resume (`children`, when it has one) beside one checkbox, "Continue
+ * automatically after <time>", that asks the gateway to continue this chat once
+ * just after the reset (`POST /api/chat/slots/{slot}/limit-continue`); unticking it
+ * cancels (`DELETE`). While that wait is armed a line says when it will continue.
+ * The gateway keeps the wait across a restart.
  *
  * Whether a wait is armed is the gateway's to say: its slot summary carries
  * `limit_continue_at` while one is held, so a reloaded card and a second tab agree.
@@ -54,6 +55,8 @@ export function LimitContinueRow({ slot, resetAt, time, offer = true, children }
   const armedIso = pressed ? pressed.at : heldAt
   const armedMs = armedIso ? Date.parse(armedIso) : NaN
   const armedTime = Number.isFinite(armedMs) ? fmtDateTime(armedMs) : time
+  const boxId = useId()
+  const label = i18nT('pages.chat.errorCard.limit_continue', { time })
   const toggle = useMutation({
     mutationFn: async (on: boolean) => {
       if (!on) return { started: Boolean((await api.cancelLimitContinue(slot)).started) }
@@ -83,21 +86,23 @@ export function LimitContinueRow({ slot, resetAt, time, offer = true, children }
       )}
       <div className="flex flex-wrap items-center gap-2">
         {children}
-        <button
-          type="button"
-          onClick={() => toggle.mutate(!armed)}
-          disabled={toggle.isPending}
-          aria-pressed={armed}
-          className={`${ACTION_BTN} bg-transparent text-text ring-1 ring-inset ring-border hover:bg-bg-elevated`}
-          data-testid="error-card-limit-continue"
+        <label
+          htmlFor={boxId}
+          className={`${ACTION_BTN} bg-transparent text-text ring-1 ring-inset ring-border hover:bg-bg-elevated has-[:disabled]:opacity-50 has-[:disabled]:cursor-not-allowed`}
         >
-          {toggle.isPending
-            ? <Loader2 size={12} className="lucide-inline shrink-0 animate-spin" aria-hidden="true" />
-            : armed
-              ? <X size={12} className="lucide-inline shrink-0" aria-hidden="true" />
-              : <Timer size={12} className="lucide-inline shrink-0" aria-hidden="true" />}
-          {armed ? i18nT('pages.chat.errorCard.limit_continue_cancel') : i18nT('pages.chat.errorCard.limit_continue', { time })}
-        </button>
+          <input
+            id={boxId}
+            aria-label={label}
+            type="checkbox"
+            checked={armed}
+            disabled={toggle.isPending}
+            onChange={(e) => toggle.mutate(e.currentTarget.checked)}
+            className="h-4 w-4 shrink-0 cursor-pointer accent-accent disabled:cursor-not-allowed"
+            data-testid="error-card-limit-continue"
+          />
+          {label}
+          {toggle.isPending && <Loader2 size={12} className="lucide-inline shrink-0 animate-spin" aria-hidden="true" />}
+        </label>
       </div>
       {toggle.isError && (
         <ErrorNotice

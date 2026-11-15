@@ -13138,7 +13138,6 @@
         "limit_resets_at": "La limite est réinitialisée le {{time}}.",
         "limit_continue": "Continuer automatiquement après {{time}}",
         "limit_continue_armed": "Cette conversation reprendra une fois d’elle-même à {{time}}. Envoyer un message avant l’annule.",
-        "limit_continue_cancel": "Annuler la reprise automatique",
         "limit_continue_failed": "Impossible de programmer la reprise automatique. Réessaie.",
         "limit_continue_started": "La reprise automatique avait déjà commencé, elle n’a donc pas été annulée.",
         "feature_request_form_cli_missing": "Déposer la demande sur GitHub",

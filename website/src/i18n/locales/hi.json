@@ -12857,7 +12857,6 @@
         "limit_resets_at": "सीमा {{time}} को रीसेट होगी।",
         "limit_continue": "{{time}} के बाद अपने आप जारी रखो",
         "limit_continue_armed": "यह चैट {{time}} पर एक बार अपने आप जारी रहेगी। उससे पहले संदेश भेजने पर यह रद्द हो जाएगा।",
-        "limit_continue_cancel": "स्वचालित रूप से जारी रखना रद्द करो",
         "limit_continue_failed": "स्वचालित रूप से जारी रखना सेट नहीं हो सका। फिर से कोशिश करो।",
         "limit_continue_started": "स्वचालित जारी रखना पहले ही शुरू हो चुका था, इसलिए इसे रद्द नहीं किया गया।",
         "feature_request_form_cli_missing": "GitHub पर अनुरोध दर्ज करो",

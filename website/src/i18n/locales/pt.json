@@ -13138,7 +13138,6 @@
         "limit_resets_at": "O limite é redefinido em {{time}}.",
         "limit_continue": "Continuar automaticamente após {{time}}",
         "limit_continue_armed": "Este chat continuará sozinho uma vez às {{time}}. Enviar uma mensagem antes cancela isso.",
-        "limit_continue_cancel": "Cancelar a continuação automática",
         "limit_continue_failed": "Não foi possível programar a continuação automática. Tente novamente.",
         "limit_continue_started": "A continuação automática já tinha começado, por isso não foi cancelada.",
         "feature_request_form_cli_missing": "Enviar a solicitação no GitHub",

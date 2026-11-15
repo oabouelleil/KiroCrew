@@ -6382,7 +6382,6 @@
         "limit_resets_at": "The limit resets on {{time}}.",
         "limit_continue": "Continue automatically after {{time}}",
         "limit_continue_armed": "This chat will continue once by itself at {{time}}. Sending a message first cancels it.",
-        "limit_continue_cancel": "Cancel automatic continue",
         "limit_continue_failed": "Could not set up the automatic continue. Try again.",
         "limit_continue_started": "The automatic continue had already started, so it was not cancelled.",
         "feature_request_form_cli_missing": "File the request on GitHub",

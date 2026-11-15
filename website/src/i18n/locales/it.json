@@ -13138,7 +13138,6 @@
         "limit_resets_at": "Il limite si azzera il {{time}}.",
         "limit_continue": "Continua automaticamente dopo {{time}}",
         "limit_continue_armed": "Questa chat riprenderà da sola una volta alle {{time}}. Inviare un messaggio prima annulla l’operazione.",
-        "limit_continue_cancel": "Annulla la ripresa automatica",
         "limit_continue_failed": "Impossibile programmare la ripresa automatica. Riprova.",
         "limit_continue_started": "La continuazione automatica era già iniziata, quindi non è stata annullata.",
         "feature_request_form_cli_missing": "Invia la richiesta su GitHub",

@@ -38,13 +38,13 @@ afterEach(() => {
 })
 
 describe('ErrorCard — continue automatically after a usage limit resets', () => {
-  it('offers the button under the reset line, beside Resume and nothing else', () => {
+  it('offers the checkbox under the reset line, beside Resume and nothing else', () => {
     card()
     const time = fmtDateTime(Date.parse(AHEAD))
     expect(screen.getByTestId('error-card-limit-reset')).toHaveTextContent(`The limit resets on ${time}.`)
-    expect(screen.getByTestId('error-card-limit-continue')).toHaveTextContent(`Continue automatically after ${time}`)
+    expect(screen.getByRole('checkbox', { name: `Continue automatically after ${time}` })).not.toBeChecked()
     expect(screen.getByTestId('error-card-continue')).toBeVisible()
-    expect(screen.getByTestId('error-card').querySelectorAll('button')).toHaveLength(2)
+    expect(screen.getByTestId('error-card').querySelectorAll('button')).toHaveLength(1)
     expect(screen.queryByTestId('error-card-limit-continue-armed')).toBeNull()
   })
 
@@ -66,27 +66,26 @@ describe('ErrorCard — continue automatically after a usage limit resets', () =
     expect(screen.queryByTestId('error-card-limit-continue')).toBeNull()
   })
 
-  it('arms the chat for the row’s instant, then offers Cancel and says when it will continue', async () => {
+  it('arms the chat for the row’s instant, then stays ticked and says when it will continue', async () => {
     client.armLimitContinue.mockResolvedValue({ ok: true, continue_at: RESUME })
     card()
     fireEvent.click(screen.getByTestId('error-card-limit-continue'))
-    await waitFor(() => expect(screen.getByTestId('error-card-limit-continue')).toHaveAttribute('aria-pressed', 'true'))
+    await waitFor(() => expect(screen.getByTestId('error-card-limit-continue')).toBeChecked())
     expect(client.armLimitContinue).toHaveBeenCalledWith('s1', AHEAD)
-    expect(screen.getByTestId('error-card-limit-continue')).toHaveTextContent('Cancel automatic continue')
     expect(screen.getByTestId('error-card-limit-continue-armed')).toHaveTextContent(
       `This chat will continue once by itself at ${fmtDateTime(Date.parse(RESUME))}.`,
     )
-    expect(screen.getByTestId('error-card').querySelectorAll('button')).toHaveLength(2)
+    expect(screen.getByTestId('error-card').querySelectorAll('button')).toHaveLength(1)
   })
 
-  it('cancels on the next press', async () => {
+  it('cancels when unticked', async () => {
     client.armLimitContinue.mockResolvedValue({ ok: true })
     client.cancelLimitContinue.mockResolvedValue({ ok: true, cancelled: true })
     card()
     fireEvent.click(screen.getByTestId('error-card-limit-continue'))
-    await waitFor(() => expect(screen.getByTestId('error-card-limit-continue')).toHaveAttribute('aria-pressed', 'true'))
+    await waitFor(() => expect(screen.getByTestId('error-card-limit-continue')).toBeChecked())
     fireEvent.click(screen.getByTestId('error-card-limit-continue'))
-    await waitFor(() => expect(screen.getByTestId('error-card-limit-continue')).toHaveAttribute('aria-pressed', 'false'))
+    await waitFor(() => expect(screen.getByTestId('error-card-limit-continue')).not.toBeChecked())
     expect(client.cancelLimitContinue).toHaveBeenCalledWith('s1')
     expect(screen.queryByTestId('error-card-limit-continue-armed')).toBeNull()
   })
@@ -114,11 +113,11 @@ describe('ErrorCard — continue automatically after a usage limit resets', () =
   it.each([
     ['the reset has passed but the gateway’s margin has not', { meta: { kind: 'usage_limit', reset_at: GONE } }],
     ['the chat cannot be resumed right now', { onContinue: undefined }],
-  ])('keeps Cancel while the gateway holds a wait and %s', async (_label, props) => {
+  ])('keeps the ticked box while the gateway holds a wait and %s', async (_label, props) => {
     client.cancelLimitContinue.mockResolvedValue({ ok: true, cancelled: true })
     card(props, slotRow(RESUME))
     expect(screen.getByTestId('error-card-limit-continue-armed')).toBeVisible()
-    expect(screen.getByTestId('error-card-limit-continue')).toHaveTextContent('Cancel automatic continue')
+    expect(screen.getByTestId('error-card-limit-continue')).toBeChecked()
     fireEvent.click(screen.getByTestId('error-card-limit-continue'))
     await waitFor(() => expect(screen.queryByTestId('error-card-limit-continue')).toBeNull())
     expect(client.cancelLimitContinue).toHaveBeenCalledWith('s1')
@@ -127,7 +126,7 @@ describe('ErrorCard — continue automatically after a usage limit resets', () =
 
   it('shows a wait the gateway already holds, as a reloaded card does', () => {
     card({}, slotRow(RESUME))
-    expect(screen.getByTestId('error-card-limit-continue')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('error-card-limit-continue')).toBeChecked()
     expect(screen.getByTestId('error-card-limit-continue-armed')).toHaveTextContent(
       `This chat will continue once by itself at ${fmtDateTime(Date.parse(RESUME))}.`,
     )
@@ -138,11 +137,11 @@ describe('ErrorCard — continue automatically after a usage limit resets', () =
     client.armLimitContinue.mockResolvedValue({ ok: true })
     const { store } = card()
     fireEvent.click(screen.getByTestId('error-card-limit-continue'))
-    await waitFor(() => expect(screen.getByTestId('error-card-limit-continue')).toHaveAttribute('aria-pressed', 'true'))
+    await waitFor(() => expect(screen.getByTestId('error-card-limit-continue')).toBeChecked())
     act(() => { store.dispatch(sseSlots([slotRow(RESUME)])) })
-    expect(screen.getByTestId('error-card-limit-continue')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('error-card-limit-continue')).toBeChecked()
     act(() => { store.dispatch(sseSlots([slotRow()])) })
-    expect(screen.getByTestId('error-card-limit-continue')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('error-card-limit-continue')).not.toBeChecked()
   })
 
   it.each([
@@ -153,7 +152,7 @@ describe('ErrorCard — continue automatically after a usage limit resets', () =
     card()
     fireEvent.click(screen.getByTestId('error-card-limit-continue'))
     expect(await screen.findByTestId('error-card-limit-continue-failed')).toHaveTextContent('Could not set up the automatic continue')
-    expect(screen.getByTestId('error-card-limit-continue')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('error-card-limit-continue')).not.toBeChecked()
     expect(screen.getByTestId('error-card-continue')).toBeVisible()
   })
 })

@@ -12857,7 +12857,6 @@
         "limit_resets_at": "Das Limit wird am {{time}} zurückgesetzt.",
         "limit_continue": "Nach {{time}} automatisch fortsetzen",
         "limit_continue_armed": "Dieser Chat wird um {{time}} einmal von selbst fortgesetzt. Eine vorher gesendete Nachricht bricht das ab.",
-        "limit_continue_cancel": "Automatisches Fortsetzen abbrechen",
         "limit_continue_failed": "Das automatische Fortsetzen konnte nicht eingerichtet werden. Versuche es erneut.",
         "limit_continue_started": "Das automatische Fortsetzen hatte schon begonnen und wurde daher nicht abgebrochen.",
         "feature_request_form_cli_missing": "Vorschlag auf GitHub einreichen",
