@@ -329,6 +329,7 @@ from kiro_crew.dashboard.chat_api.slot_guards import (  # noqa: F401
     _switch_target_busy,
 )
 from kiro_crew.dashboard.chat_api.slot_harness import (  # noqa: F401
+    _caller_withdrawn,
     _current_harness,
     _harness_refusal,
     api_chat_slot_backend,

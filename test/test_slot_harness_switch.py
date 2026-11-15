@@ -365,6 +365,21 @@ def test_a_rebind_during_the_reset_rolls_back(world, monkeypatch):
     assert world.slot.backend == "claude"
 
 
+@pytest.mark.parametrize("target", ["codex", "claude"])
+def test_a_caller_whose_gate_closed_is_refused_at_the_commit(world, target):
+    """``still_permitted`` is read right before each commit, the switch and the
+    already-there pick alike. Mutation guard: skipping it commits for a caller
+    that may not touch the chat."""
+    world.slot.backend = ""
+    caller = _CALLER._replace(still_permitted=lambda: False)
+
+    response = asyncio.run(switch_slot_harness(world.state, world.slot, _SLOT, target, caller))
+
+    assert (response.status, json.loads(response.text)["code"]) == (403, "caller_not_permitted")
+    assert world.slot.backend == ""
+    assert world.resets == []
+
+
 def test_the_http_route_switches_and_refuses_another_apps_slot(world):
     """Through the route: the body's ``backend`` reaches the core, and an app token
     on a slot it does not own gets the uniform 404 with nothing changed."""

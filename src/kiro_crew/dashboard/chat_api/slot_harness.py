@@ -69,6 +69,16 @@ def _harness_refusal(message: str, code: str, status: int) -> web.Response:
     return web.json_response({"error": message, "code": code}, status=status)
 
 
+def _caller_withdrawn(caller: SlotAgentSwitchCaller) -> web.Response | None:
+    """The refusal when the caller's own gate closed during the awaits, else ``None``.
+
+    Run synchronously right before each commit, as the agent switch runs it.
+    """
+    if caller.still_permitted is not None and not caller.still_permitted():
+        return _harness_refusal("the caller is no longer permitted", "caller_not_permitted", 403)
+    return None
+
+
 def _current_harness(provider: object) -> str | None:
     """The runtime backend id *provider* runs, or ``None`` when it names none."""
     if not isinstance(provider, AcpProvider):
@@ -89,7 +99,8 @@ async def switch_slot_harness(
     Refused, with nothing changed, while the ``session_harness`` preview is off, for a
     harness that cannot start here (the spawn endpoint's check, without its failover
     walk), for a session whose harness a channel or a Bot decides, while a turn runs
-    and while sub-agents are attached. A chat already on the harness answers 200 and
+    and while sub-agents are attached. A caller whose ``still_permitted`` turns false
+    during the awaits is refused at the commit. A chat already on the harness answers 200 and
     keeps its session. Otherwise the pick is committed, the session is reset, and the
     transcript gets a boundary row; a reset a slipped-in turn declines is rolled back.
     """
@@ -160,6 +171,9 @@ async def switch_slot_harness(
                 "the harness this chat runs on cannot be read", "harness_switch_unsupported", 409
             )
         if on_now == target:
+            denied = _caller_withdrawn(caller)
+            if denied is not None:
+                return denied
             # Already there: record the pick so the chat stays on it, tear nothing down.
             if slot.backend != stored:
                 slot.backend = stored
@@ -178,6 +192,9 @@ async def switch_slot_harness(
             own_turn=caller.own_turn,
         ):
             return _harness_refusal("a turn is in flight", "turn_in_flight", 409)
+        denied = _caller_withdrawn(caller)
+        if denied is not None:
+            return denied
         prior = slot.backend
         # Rolled back to an explicit pick of the harness the chat was on: a merge save
         # writes only a truthy pick, so restoring "" could leave the new one on disk.
