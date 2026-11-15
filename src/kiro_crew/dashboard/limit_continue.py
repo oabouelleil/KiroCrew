@@ -17,7 +17,9 @@ from a small record apart from the wait, so a Cancel that reaches the gateway af
 wait ended still learns the continue went ahead. A message typed meanwhile, a
 closed chat, a turn already running, a conductor mode "Pause all" holding the
 chat, a relay archive or a gateway shutting down makes it do nothing. Nothing is
-armed unless a person presses the button.
+armed unless a person presses the button. Meanwhile the gateway's own wakes into
+the chat are held (:func:`holds_automation`), so a loop's turn cannot hit the same
+limit and end the wait.
 
 The wait is a timer in the running gateway. A restart drops it and the row keeps
 ``reset_at``, so the card offers the button again. The wait holds the chat only
@@ -207,6 +209,26 @@ async def cancel_all(_app: web.Application | None = None) -> None:
     if firing:
         await asyncio.gather(*firing, return_exceptions=True)
     _STARTED.clear()
+
+
+def holds_automation(slot: Any) -> bool:
+    """Whether a wake the gateway sends into *slot* on its own waits for the limit.
+
+    True while a wait is armed on the row the chat still ends on and its continue
+    is not yet queued (including the margin after the reset), and while the chat
+    ends on a usage-limit row whose reset is still ahead, armed or not: a turn
+    started then is refused by the same limit, and its new limit row would end
+    the person's wait. A held wake writes nothing and is tried again later, so the
+    wait survives it. A message the person types is not a wake and is never held.
+    """
+    messages = getattr(slot, "messages", None)
+    if not isinstance(messages, list):
+        return False
+    armed = _ARMED.get(getattr(slot, "key", ""))
+    if armed is not None and not armed.queued and armed.holds(slot):
+        return True
+    reset_at = limit_reset_of(messages)
+    return reset_at is not None and reset_at > time.time()
 
 
 def armed_resume_iso(slot: Any) -> str | None:

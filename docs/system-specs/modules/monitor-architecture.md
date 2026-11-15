@@ -299,7 +299,14 @@ hook, background-turn budget and run kwargs): an idle slot runs that starter,
 which, once it admits the turn, writes the nudge row through
 `session_deliver.write_origin_row` (the `automation` origin, plus its `monitor`
 record), the same mapping a steered wake uses; a running slot declines it, and the
-fire then steers a work-ledger wake or leaves the cycle to the turn's end.
+fire then steers a work-ledger wake or leaves the cycle to the turn's end. An idle
+slot that waits for a usage limit to reset (`limit_continue.holds_automation`: a
+"Continue automatically" wait is armed and its continue not yet queued, or the chat
+ends on a usage-limit row whose reset is still ahead) runs no starter and answers
+`HELD`, which the fire returns as `BUSY`: no row, no cycle spent, and the wake is
+tried again, so a loop's turn cannot hit the same limit and end the person's wait.
+Only this automation path is held; a cron notification, an app message and a peer
+`session_send` carry text of their own and are delivered as before.
 
 The `monitoring/` package now has a different extension point:
 `models.MonitorProbe`, a structural Protocol with no behaviour inheritance, plus
