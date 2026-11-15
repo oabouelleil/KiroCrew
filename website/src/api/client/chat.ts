@@ -365,6 +365,8 @@ export function createChatEndpoints({ post, put, del, patch, j, jAccepted, jfetc
     armLimitContinue: (slot: string, resetAt: string) => post('/api/chat/slots/' + encodeURIComponent(slot) + '/limit-continue', { reset_at: resetAt }).then(j) as Promise<{ ok: boolean; warning?: string; continue_at?: string }>,
     /** Cancel the wait `armLimitContinue` armed for this chat. `started: true` means the continue was already queued, so nothing was cancelled. */
     cancelLimitContinue: (slot: string) => del('/api/chat/slots/' + encodeURIComponent(slot) + '/limit-continue').then(j) as Promise<{ ok: boolean; cancelled: boolean; started?: boolean }>,
+    /** Move a chat that stopped on a usage limit onto `backend` (spelled as `chatSlotBackend` spells it) and continue it there. `continued` is `"resumed"` or `"continued"`, or `""` with a `warning` when the switch went through but the continue could not queue. */
+    limitSwitch: (slot: string, backend: string) => post('/api/chat/slots/' + encodeURIComponent(slot) + '/limit-switch', { backend }).then(j) as Promise<{ ok: boolean; backend?: string; harness?: string; continued?: string; warning?: string }>,
     /** The bulk form of `continueSlot`: Resume every idle session whose last turn ended without a reply (only those among `slots` when given). Owner-only. Starts a background run and answers at once (409 `resume_all_running` with that run's id and total while one is in flight); the outcome arrives as a `resume_all_done` frame. */
     /** `crewMode`: this build offers conductor mode, so its count left out the workers of listed roots and the run leaves them out too. */
     chatSlotsResumeAll: (crewMode = false, slots?: string[]) => post('/api/chat/slots/resume-all', {

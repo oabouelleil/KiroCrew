@@ -13146,6 +13146,7 @@
         "limit_continue_cancel": "Annuler la reprise automatique",
         "limit_continue_failed": "Impossible de programmer la reprise automatique. Réessaie.",
         "limit_continue_started": "La reprise automatique avait déjà commencé, elle n’a donc pas été annulée.",
+        "limit_switch": "Passer à {{harness}} et continuer",
         "feature_request_form_cli_missing": "Déposer la demande sur GitHub",
         "feature_request_form_cli_missing_hint": "Kiro ne peut pas répondre car kiro-cli n’est pas installé sur cet ordinateur. Dépose plutôt ta demande sur GitHub : le formulaire s’ouvre dans un nouvel onglet, et il te faut un compte GitHub.",
         "session_start_repeat_hint": "La session de l’agent n’a pas pu démarrer plusieurs fois de suite ; reprendre ne ferait que relancer le même démarrage. Redémarre le gateway depuis un terminal avec {{command}}, puis renvoie ton message.",

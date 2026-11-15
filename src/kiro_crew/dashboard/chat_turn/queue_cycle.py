@@ -465,12 +465,14 @@ async def _finish_queue_cycle(
     slot.task = None
     state.push_slots_update()
     await _send_chat_done(state, slot, payload=payload)
-    if drain:
-        # A chat that stopped on a usage limit may move to another harness.
+    chosen_restored = drain and _chosen_restored_head(slot) is not None
+    if drain and not chosen_restored:
+        # A chat that stopped on a usage limit may move to another harness; a
+        # restored card about to run gets the floor first.
         from kiro_crew.dashboard import limit_switch
 
         limit_switch.after_cycle_end(state, slot)
-    if drain and _chosen_restored_head(slot) is not None:
+    if chosen_restored:
         # A task of its own: it takes the slot's lock, which a caller of this
         # cycle may hold.
         chosen_start = asyncio.ensure_future(

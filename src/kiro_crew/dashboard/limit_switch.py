@@ -14,14 +14,15 @@ for the reset, the chat can carry on on another agent harness:
 Both run :func:`switch_and_continue`: the harness switch
 (``chat_handlers.switch_slot_harness``, which applies every gate, the
 ``session_harness`` preview included), then the continue Resume runs
-(``chat_handlers.continue_slot_turn``). The boundary row the switch appends means
-the chat no longer ends on the limit row, so a "Continue automatically" wait armed
+(``chat_handlers.continue_slot_turn``). After the boundary row the switch appends,
+the chat does not end on the limit row, so a "Continue automatically" wait armed
 on that row could never fire; it is cancelled too.
 
 Never onto the harness that hit the limit, and never round and round: the gateway
-moves a chat by itself at most once per message sent into it. When the harness it
-moved to also stops on a limit before the next message, the chat stays there and
-shows that limit's card. The chat does not move back when the first limit resets.
+moves a chat by itself at most once per message a person sends it, and never an
+app's chat. When the harness it moved to also stops on a limit before the person's
+next message, the chat stays there and shows that limit's card. The chat does not
+move back when the first limit resets.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from kiro_crew.dashboard.chat_utils import USAGE_LIMIT_KIND
 from kiro_crew.dashboard.limit_continue import cancel as cancel_limit_continue
 from kiro_crew.dashboard.limit_continue import ends_on_usage_limit
 from kiro_crew.dashboard.system_notices import SESSION_SWITCH_KIND, SESSION_SWITCH_REASON_KEY
+from kiro_crew.history_schema import HUMAN_TURN_META_KEY
 
 if TYPE_CHECKING:
     from kiro_crew.dashboard.chat_handlers import SlotAgentSwitchCaller
@@ -48,20 +50,21 @@ LIMIT_SWITCH_VIA = "usage_limit_switch"
 
 
 def moved_since_last_message(messages: list[dict]) -> bool:
-    """Whether a usage-limit switch came after the newest message sent into the chat.
+    """Whether a usage-limit switch came after the newest message a person sent the chat.
 
-    Walks back to the newest ``user`` row with content. A Resume, a recovery or a
-    loop's wake opens no such row, so the turn a switch continued, and any automated
-    turn after it, still count as the same stretch.
+    Walks back to the newest ``user`` row a person authored (``HUMAN_TURN_META_KEY``).
+    A Resume, a recovery, a loop's wake and a message another session or an app
+    sends are not one, so the turn a switch continued, and any automated turn
+    after it, still count as the same stretch.
     """
     for m in reversed(messages):
         role = m.get("role")
-        if role == "user" and m.get("content"):
-            return False
         meta = m.get("meta")
+        meta = meta if isinstance(meta, dict) else {}
+        if role == "user" and m.get("content") and meta.get(HUMAN_TURN_META_KEY):
+            return False
         if (
             role == "assistant"
-            and isinstance(meta, dict)
             and meta.get("kind") == SESSION_SWITCH_KIND
             and meta.get(SESSION_SWITCH_REASON_KEY) == USAGE_LIMIT_KIND
         ):
@@ -70,15 +73,22 @@ def moved_since_last_message(messages: list[dict]) -> bool:
 
 
 async def switch_and_continue(
-    state: DashboardState, slot: Any, backend: object, caller: SlotAgentSwitchCaller
+    state: DashboardState,
+    slot: Any,
+    backend: object,
+    caller: SlotAgentSwitchCaller,
+    *,
+    user_origin: bool,
 ) -> web.Response:
     """Move *slot*, which ends on a usage limit, onto *backend* and continue it there.
 
-    Refused with 409 ``not_on_usage_limit`` when the chat does not end on a usage-limit
-    row, and with whatever ``switch_slot_harness`` refuses (``limit_switch_same_harness``
-    for the harness it is already on). A switch that commits answers 200 with the
-    switch's own body plus ``continued`` (``"resumed"`` or ``"continued"``, or ``""``
-    with ``continue_refused`` and a ``warning`` when the continue could not queue).
+    Refused with whatever ``switch_slot_harness(usage_limit=True)`` refuses, which
+    includes ``not_on_usage_limit`` for a chat that does not end on a usage-limit row
+    and ``limit_switch_same_harness`` for the harness it already runs. A switch that
+    commits answers 200 with the switch's own body plus ``continued`` (``"resumed"``
+    or ``"continued"``, or ``""`` with ``continue_refused`` and a ``warning`` when the
+    continue could not queue). *user_origin* is the continue's
+    ``directive_user_origin``: True only when a person asked for it.
     """
     from kiro_crew.dashboard.chat_handlers import (
         SlotContinueRefusal,
@@ -87,11 +97,6 @@ async def switch_and_continue(
         switch_slot_harness,
     )
 
-    if not ends_on_usage_limit(slot.messages):
-        return web.json_response(
-            {"error": "this chat does not end on a usage limit", "code": "not_on_usage_limit"},
-            status=409,
-        )
     switched = await switch_slot_harness(state, slot, slot.key, backend, caller, usage_limit=True)
     ok, answer = agent_switch_outcome(switched)
     if not ok:
@@ -102,7 +107,7 @@ async def switch_and_continue(
         answer["continued"] = await continue_slot_turn(
             state,
             slot,
-            directive_user_origin=True,
+            directive_user_origin=user_origin,
             via=LIMIT_SWITCH_VIA,
             allow_restored_queue=True,
             replaced=lambda: state._slots.get(slot.key) is not slot,
@@ -138,8 +143,14 @@ async def api_chat_slot_limit_switch(request: web.Request) -> web.Response:
     if body_err is not None:
         return body_err
     assert body is not None  # read_bounded_json returns (dict, None) on success
+    # Provenance follows the caller, as the Continue route's does: an app's request
+    # never gets the authenticated person's authority.
     return await switch_and_continue(
-        state, slot, body.get("backend"), SlotAgentSwitchCaller.for_request(request)
+        state,
+        slot,
+        body.get("backend"),
+        SlotAgentSwitchCaller.for_request(request),
+        user_origin=not request.get("app"),
     )
 
 
@@ -159,6 +170,8 @@ async def _auto_switch(state: DashboardState, slot: Any) -> None:
 
     if (
         state._slots.get(slot.key) is not slot
+        # An app's chat runs on the harness the app chose.
+        or slot._app
         or not ends_on_usage_limit(slot.messages)
         or is_relay_archive(slot)
         or crew_pause.holds_slot(slot)
@@ -181,8 +194,11 @@ async def _auto_switch(state: DashboardState, slot: Any) -> None:
     if target is None:
         return
     # The gateway acting on the owner's own config, as the Crew Mode migration does.
+    # No person asked for this continue, so it carries no person's authority.
     caller = SlotAgentSwitchCaller(app="", remote=LIMIT_SWITCH_VIA, owner=True)
-    resp = await switch_and_continue(state, slot, messaging._backend_name(target), caller)
+    resp = await switch_and_continue(
+        state, slot, messaging._backend_name(target), caller, user_origin=False
+    )
     ok, body = agent_switch_outcome(resp)
     if ok:
         logger.info("usage-limit switch of %s to %s: %s", slot.key, target, body.get("continued"))

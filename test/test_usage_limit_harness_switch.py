@@ -39,6 +39,7 @@ from kiro_crew.config.loader import KiroCrewConfig
 from kiro_crew.dashboard import chat_handlers, limit_continue, limit_switch
 from kiro_crew.dashboard.chat_handlers import SlotAgentSwitchCaller
 from kiro_crew.dashboard.system_notices import SESSION_SWITCH_KIND, SESSION_SWITCH_REASON_KEY
+from kiro_crew.history_schema import HUMAN_TURN_META_KEY
 from kiro_crew.providers.acp import AcpProvider
 
 _SLOT = "chat-1"
@@ -137,9 +138,16 @@ def world(tmp_path, monkeypatch):
 
 def _press(world, backend):
     response = asyncio.run(
-        limit_switch.switch_and_continue(world.state, world.slot, backend, _CALLER)
+        limit_switch.switch_and_continue(
+            world.state, world.slot, backend, _CALLER, user_origin=True
+        )
     )
     return response.status, json.loads(response.text)
+
+
+def _typed(slot, text: str) -> None:
+    """A message the person types: the send path marks the row as theirs."""
+    slot.append("user", text, "msg msg-u", meta={HUMAN_TURN_META_KEY: True})
 
 
 def _turn_ends(world) -> None:
@@ -168,6 +176,7 @@ class TestOnePress:
         assert world.resets == [f"dashboard:{_SLOT}"]
         world.resume.assert_awaited_once()
         assert world.resume.await_args.kwargs["via"] == limit_switch.LIMIT_SWITCH_VIA
+        assert world.resume.await_args.kwargs["directive_user_origin"] is True
         [row] = _switch_rows(world.slot)
         assert row["content"].startswith("Usage limit reached, so the harness switched to")
         assert row["meta"][SESSION_SWITCH_REASON_KEY] == "usage_limit"
@@ -179,13 +188,35 @@ class TestOnePress:
             limit_continue.arm(
                 world.state, world.slot, limit_continue.limit_reset_of(world.slot.messages)
             )
-            return await limit_switch.switch_and_continue(world.state, world.slot, "codex", _CALLER)
+            return await limit_switch.switch_and_continue(
+                world.state, world.slot, "codex", _CALLER, user_origin=True
+            )
 
         assert asyncio.run(_arm_then_press()).status == 200
         assert world.slot.key not in limit_continue._ARMED
-        # What the gateway's held wakes read: the chat has moved on from the limit.
+        # The chat has moved on from the limit, so nothing reads it as stopped there.
         assert limit_continue.limit_reset_of(world.slot.messages) is None
         assert not limit_continue.ends_on_usage_limit(world.slot.messages)
+
+    def test_a_reply_that_lands_before_the_lock_is_not_continued(self, world, monkeypatch):
+        # A turn that ended while the switch awaited its checks moved the chat past
+        # the limit: the switch reads the transcript again under the lock.
+        from kiro_crew.dashboard.handlers import messaging
+
+        real = messaging._requested_backend
+
+        async def requested_then_reply(raw, **kwargs):
+            answer = await real(raw, **kwargs)
+            world.slot.append("assistant", "done after all", "msg msg-a")
+            return answer
+
+        monkeypatch.setattr(messaging, "_requested_backend", requested_then_reply)
+
+        status, body = _press(world, "codex")
+
+        assert (status, body["code"]) == (409, "not_on_usage_limit")
+        assert world.slot.backend == "claude"
+        world.resume.assert_not_awaited()
 
     def test_the_harness_that_hit_the_limit_is_refused(self, world):
         status, body = _press(world, "claude")
@@ -196,7 +227,7 @@ class TestOnePress:
         world.resume.assert_not_awaited()
 
     def test_a_chat_not_on_a_usage_limit_is_refused(self, world):
-        world.slot.append("user", "never mind", "msg msg-u")
+        _typed(world.slot, "never mind")
 
         status, body = _press(world, "codex")
 
@@ -239,7 +270,18 @@ class TestStandingChoice:
 
         assert world.slot.backend == "codex"
         world.resume.assert_awaited_once()
+        # No person asked for this continue.
+        assert world.resume.await_args.kwargs["directive_user_origin"] is False
         assert len(_switch_rows(world.slot)) == 1
+
+    def test_an_app_chat_is_left_on_its_harness(self, world, failover):
+        failover({"enabled": True, "chain": ["claude", "codex"], "triggers": ["usage_limit"]})
+        world.slot._app = "some-app"
+
+        _turn_ends(world)
+
+        assert world.slot.backend == "claude"
+        world.resume.assert_not_awaited()
 
     @pytest.mark.parametrize(
         "block",
@@ -319,19 +361,35 @@ class TestNoLoop:
         assert len(_switch_rows(world.slot)) == 1
         world.resume.assert_awaited_once()
 
-    def test_a_message_sent_since_lets_it_move_on(self, world, failover):
+    def test_a_message_the_person_sends_since_lets_it_move_on(self, world, failover):
         failover(
             {"enabled": True, "chain": ["claude", "codex", "kas"], "triggers": ["usage_limit"]}
         )
         _turn_ends(world)
         world.live["backend"] = "codex"
-        world.slot.append("user", "keep going", "msg msg-u")
+        _typed(world.slot, "keep going")
         world.slot.messages.append(_limit_row())
 
         _turn_ends(world)
 
         assert world.slot.backend == "kas"
         assert len(_switch_rows(world.slot)) == 2
+
+    def test_a_message_from_another_session_does_not(self, world, failover):
+        # A conductor driving the chat sends unmarked user rows: they cannot walk
+        # it down the chain with no person involved.
+        failover(
+            {"enabled": True, "chain": ["claude", "codex", "kas"], "triggers": ["usage_limit"]}
+        )
+        _turn_ends(world)
+        world.live["backend"] = "codex"
+        world.slot.append("user", "[from another session] keep going", "msg msg-u")
+        world.slot.messages.append(_limit_row())
+
+        _turn_ends(world)
+
+        assert world.slot.backend == "codex"
+        assert len(_switch_rows(world.slot)) == 1
 
 
 class TestMovedSinceLastMessage:
@@ -340,20 +398,21 @@ class TestMovedSinceLastMessage:
         "content": "Usage limit reached, so the harness switched to Codex.",
         "meta": {"kind": SESSION_SWITCH_KIND, SESSION_SWITCH_REASON_KEY: "usage_limit"},
     }
+    _TYPED = {"role": "user", "content": "hi", "meta": {HUMAN_TURN_META_KEY: True}}
 
     def test_a_limit_switch_after_the_newest_message(self):
-        rows = [
-            {"role": "user", "content": "hi"},
-            self._SWITCH,
-            {"role": "inject", "content": "go"},
-        ]
+        rows = [self._TYPED, self._SWITCH, {"role": "inject", "content": "go"}]
+        assert limit_switch.moved_since_last_message(rows)
+
+    def test_an_unmarked_user_row_is_not_the_person(self):
+        rows = [self._SWITCH, {"role": "user", "content": "from a peer"}]
         assert limit_switch.moved_since_last_message(rows)
 
     @pytest.mark.parametrize(
         "rows",
         [
             [],
-            [{"role": "user", "content": "hi"}],
+            [_TYPED],
             [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}],
             # A plain harness pick is not a limit switch.
             [{"role": "assistant", "content": "x", "meta": {"kind": SESSION_SWITCH_KIND}}],
@@ -363,8 +422,34 @@ class TestMovedSinceLastMessage:
         assert not limit_switch.moved_since_last_message(rows)
 
     def test_a_message_after_the_switch_starts_over(self):
-        rows = [self._SWITCH, {"role": "user", "content": "more"}]
+        rows = [self._SWITCH, self._TYPED]
         assert not limit_switch.moved_since_last_message(rows)
+
+
+@pytest.mark.parametrize(
+    "drain, restored, called", [(True, False, True), (False, False, False), (True, True, False)]
+)
+def test_the_queue_cycle_end_hands_the_chat_to_the_switch(
+    tmp_path, _floor_monkeypatch, drain, restored, called
+):
+    from kiro_crew.dashboard import chat_runner
+
+    _floor_monkeypatch.setattr(chat_runner, "title_then_refresh", AsyncMock())
+    _floor_monkeypatch.setattr(chat_runner, "generate_session_summary", AsyncMock())
+    seen: list[str] = []
+    _floor_monkeypatch.setattr(limit_switch, "after_cycle_end", lambda _st, s: seen.append(s.key))
+    # A restored card about to run gets the floor first.
+    _floor_monkeypatch.setattr(
+        chat_runner, "_chosen_restored_head", lambda _s: object() if restored else None
+    )
+    _floor_monkeypatch.setattr(chat_runner, "_start_chosen_restored_after_release", AsyncMock())
+    state = _make_state(tmp_path)
+    slot = state.get_or_create_slot("chat-cycle")
+    slot._titled = True
+
+    asyncio.run(chat_runner._finish_queue_cycle(state, slot, drain=drain))
+
+    assert seen == (["chat-cycle"] if called else [])
 
 
 def test_the_http_route_needs_the_owner_and_switches(world):

@@ -12584,6 +12584,7 @@
         "limit_continue_cancel": "自動続行を取り消す",
         "limit_continue_failed": "自動続行を設定できませんでした。もう一度お試しください。",
         "limit_continue_started": "自動での再開はすでに始まっていたため、キャンセルされませんでした。",
+        "limit_switch": "{{harness}}に切り替えて続行",
         "feature_request_form_cli_missing": "GitHub でリクエストを送る",
         "feature_request_form_cli_missing_hint": "このコンピューターに kiro-cli がインストールされていないため、Kiro は返信できません。代わりに GitHub で機能リクエストを送信してください。フォームは新しいタブで開き、GitHub アカウントが必要です。",
         "session_start_repeat_hint": "エージェントセッションの起動が連続して複数回失敗しました。再開しても同じ起動を繰り返すだけです。ターミナルで {{command}} を実行して gateway を再起動し、メッセージをもう一度送信してください。",

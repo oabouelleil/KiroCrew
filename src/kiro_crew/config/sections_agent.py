@@ -297,7 +297,7 @@ class AgentConfig:
             "member when the one it asked for cannot start; usage_limit, only when "
             "named, moves a dashboard chat that stopped on a usage limit to the "
             "next member and continues it, with the Agent Harness feature preview "
-            "on, at most once per message sent into the chat). "
+            "on, at most once per message a person sends the chat). "
             "A hop only goes to a later chain member that can start, never a "
             "silent Kiro fallback. The spawn result names the backend that ran "
             "and the one it replaced; a moved chat gets a row naming the harness "

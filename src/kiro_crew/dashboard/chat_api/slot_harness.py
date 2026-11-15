@@ -122,16 +122,18 @@ async def switch_slot_harness(
     keeps its session. Otherwise the pick is committed, the session is reset, and the
     transcript gets a boundary row; a reset a slipped-in turn declines is rolled back.
 
-    *usage_limit* is the usage-limit switch (``dashboard.limit_switch``):
-    a chat already on the harness is refused with ``limit_switch_same_harness``, since
-    staying there only meets the same limit, and the boundary row says why it moved
-    and carries the reason in its meta.
+    *usage_limit* is the usage-limit switch (``dashboard.limit_switch``): refused
+    with ``not_on_usage_limit`` unless the chat still ends on a usage-limit row,
+    read under the lock, and with ``limit_switch_same_harness`` for the harness it
+    already runs, since staying there only meets the same limit; the boundary row
+    says why it moved and carries the reason in its meta.
     """
     from kiro_crew import session_harness_preview as harness_preview
     from kiro_crew.agent_sdk.backends import backend_to_stored
     from kiro_crew.crewmate_harness import harness_label
     from kiro_crew.dashboard.chat_utils import USAGE_LIMIT_KIND
     from kiro_crew.dashboard.handlers import messaging
+    from kiro_crew.dashboard.limit_continue import ends_on_usage_limit
     from kiro_crew.dashboard.session_control import channel_drives_session
     from kiro_crew.dashboard.system_notices import SESSION_SWITCH_REASON_KEY
     from kiro_crew.members import (
@@ -182,6 +184,12 @@ async def switch_slot_harness(
                 "this chat's harness is set by its channel or its Bot, not per chat",
                 "harness_switch_unsupported",
                 409,
+            )
+        # Read again under the lock: a turn that ended meanwhile may have moved the
+        # chat past the limit, and a switch then would continue a finished reply.
+        if usage_limit and not ends_on_usage_limit(slot.messages):
+            return _harness_refusal(
+                "this chat does not end on a usage limit", "not_on_usage_limit", 409
             )
         on_now = await slot_harness_now(state, slot)
         if on_now is None:

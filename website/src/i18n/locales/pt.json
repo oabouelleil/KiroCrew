@@ -13146,6 +13146,7 @@
         "limit_continue_cancel": "Cancelar a continuação automática",
         "limit_continue_failed": "Não foi possível programar a continuação automática. Tente novamente.",
         "limit_continue_started": "A continuação automática já tinha começado, por isso não foi cancelada.",
+        "limit_switch": "Mudar para {{harness}} e continuar",
         "feature_request_form_cli_missing": "Enviar a solicitação no GitHub",
         "feature_request_form_cli_missing_hint": "O Kiro não pode responder porque o kiro-cli não está instalado neste computador. Envie sua solicitação no GitHub: o formulário abre em uma nova aba, e você precisa de uma conta no GitHub.",
         "session_start_repeat_hint": "A sessão do agente falhou ao iniciar mais de uma vez seguida, então retomar apenas repetiria o mesmo início. Reinicie o gateway em um terminal com {{command}} e reenvie sua mensagem.",

@@ -6385,6 +6385,7 @@
         "limit_continue_cancel": "Cancel automatic continue",
         "limit_continue_failed": "Could not set up the automatic continue. Try again.",
         "limit_continue_started": "The automatic continue had already started, so it was not cancelled.",
+        "limit_switch": "Switch to {{harness}} and continue",
         "feature_request_form_cli_missing": "File the request on GitHub",
         "feature_request_form_cli_missing_hint": "Kiro can't reply because kiro-cli isn't installed on this computer. File your feature request on GitHub instead: the form opens in a new tab, and you'll need a GitHub account.",
         "sign_in": "Sign in to Kiro",

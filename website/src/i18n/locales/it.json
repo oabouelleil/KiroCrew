@@ -13146,6 +13146,7 @@
         "limit_continue_cancel": "Annulla la ripresa automatica",
         "limit_continue_failed": "Impossibile programmare la ripresa automatica. Riprova.",
         "limit_continue_started": "La continuazione automatica era già iniziata, quindi non è stata annullata.",
+        "limit_switch": "Passa a {{harness}} e continua",
         "feature_request_form_cli_missing": "Invia la richiesta su GitHub",
         "feature_request_form_cli_missing_hint": "Kiro non può rispondere perché kiro-cli non è installato su questo computer. Invia invece la richiesta su GitHub: il modulo si apre in una nuova scheda e serve un account GitHub.",
         "session_start_repeat_hint": "La sessione dell’agente non è riuscita ad avviarsi più volte di seguito, quindi riprendere ripeterebbe solo lo stesso avvio. Riavvia il gateway da un terminale con {{command}} e reinvia il messaggio.",
