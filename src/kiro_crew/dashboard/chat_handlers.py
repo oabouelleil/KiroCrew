@@ -88,6 +88,7 @@ from kiro_crew.dashboard.chat_api import slot_detail as _owner_slot_detail
 from kiro_crew.dashboard.chat_api import slot_discard as _owner_slot_discard
 from kiro_crew.dashboard.chat_api import slot_effort as _owner_slot_effort
 from kiro_crew.dashboard.chat_api import slot_guards as _owner_slot_guards
+from kiro_crew.dashboard.chat_api import slot_harness as _owner_slot_harness
 from kiro_crew.dashboard.chat_api import slot_lifecycle as _owner_slot_lifecycle
 from kiro_crew.dashboard.chat_api import slot_model as _owner_slot_model
 from kiro_crew.dashboard.chat_api import slot_note as _owner_slot_note
@@ -326,6 +327,12 @@ from kiro_crew.dashboard.chat_api.slot_guards import (  # noqa: F401
     _subagents_attached_detail,
     _subagents_attached_response,
     _switch_target_busy,
+)
+from kiro_crew.dashboard.chat_api.slot_harness import (  # noqa: F401
+    _current_harness,
+    _harness_refusal,
+    api_chat_slot_backend,
+    switch_slot_harness,
 )
 from kiro_crew.dashboard.chat_api.slot_lifecycle import (  # noqa: F401
     _await_guarded_history_write,
@@ -1478,6 +1485,7 @@ _facade_compose(
         _owner_slot_discard,
         _owner_slot_effort,
         _owner_slot_guards,
+        _owner_slot_harness,
         _owner_slot_lifecycle,
         _owner_slot_model,
         _owner_slot_note,

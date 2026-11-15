@@ -7,6 +7,9 @@ behind ``dashboard.feature_previews.session_harness``, default off. Off, the too
 schemas do not advertise ``backend`` and the create route refuses one with
 ``session_harness_preview_off``, creating nothing. A Bot's own harness pin and
 ``spawn_run(backend=...)`` are not part of this preview and work either way.
+
+The same preview gates moving an existing chat onto another harness
+(``POST /api/chat/slots/{slot}/backend``, ``dashboard.chat_api.slot_harness``).
 """
 
 from __future__ import annotations

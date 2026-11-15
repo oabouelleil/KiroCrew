@@ -890,7 +890,10 @@ the gate's: `spawn_run(backend=...)` > this pick > the Bot's own harness pin
 `spawn_run` from such a session with no `backend` of its own, and not selecting
 another Bot with `crew`, takes the pick as its own `backend` at admission, so a
 queued run replayed after a restart and a `spawn_continue` keep it. The pick is
-set only at creation; there is no verb that changes it later.
+set at creation and changed later only by the dashboard's harness switch
+(`POST /api/chat/slots/{slot}/backend`, `chat_api.slot_harness`; see
+[learn-cron-dashboard](learn-cron-dashboard.md) "Harness switch"), which re-points
+it on an idle chat and resets its session. There is no session-control verb for it.
 
 The choice is behind the `session_harness` feature preview
 (`dashboard.feature_previews.session_harness`, default off,

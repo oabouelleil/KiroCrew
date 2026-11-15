@@ -241,8 +241,14 @@ def _inherited_backend_name(parent_session: object, *, member: bool) -> str:
 
 async def _requested_backend(
     raw: object,
+    *,
+    failover: bool = True,
 ) -> tuple[str | None, str | None, web.Response | None]:
     """The backend a spawn starts on, the name it replaced, or the refusal.
+
+    ``failover=False`` never walks ``agent.acp_failover``: a backend that cannot
+    start is refused, for a caller that a person named the backend for (the
+    chat's harness switch).
 
     ``(None, None, None)`` when the request names none: the run starts on the
     gateway default exactly as before. The middle value is the requested name
@@ -298,7 +304,7 @@ async def _requested_backend(
     # and names this refusal as a trigger, may start a later member instead. The
     # caller is told (see ``api_spawn``), because the prompt then goes to another
     # vendor.
-    hop, tried = await _failover_backend(raw, code, available)
+    hop, tried = await _failover_backend(raw, code, available) if failover else (None, ())
     if hop is not None:
         return hop, raw, None
     chain_note = _chain_note(tried)

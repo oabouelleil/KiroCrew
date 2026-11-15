@@ -76,6 +76,10 @@ _SESSION_SWITCH_TEXT: dict[str, str] = {
         "Reasoning effort switched to {value}. Replies from here on use the new reasoning effort."
     ),
     "workspace": "Workspace switched to {value}. Replies from here on use the new workspace.",
+    "backend": (
+        "Harness switched to {value}. The conversation so far is replayed to it "
+        "with your next message."
+    ),
 }
 
 _SWITCH_VALUE_MAX = 80

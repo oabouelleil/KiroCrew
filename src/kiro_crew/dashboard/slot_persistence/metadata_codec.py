@@ -1081,8 +1081,10 @@ FIELDS: tuple[Field, ...] = (
         attr="backend",
         line=_truthy(lambda s: s.backend),
         # Truthy in the merge too, and not slot-owned (``SLOT_OWNED_META_KEYS``):
-        # the pick is set once, at creation, and never cleared, so a carried-forward
-        # copy is always current and a line without one stays byte-identical to main's.
+        # the pick is set at creation or by a harness switch (``slot_harness``),
+        # and neither ever clears it (a switch's rollback restores an explicit
+        # pick), so a carried-forward copy is current and a line without one
+        # stays byte-identical to main's.
         merge=_truthy(lambda s: s.backend),
         read=_read_backend,
     ),
