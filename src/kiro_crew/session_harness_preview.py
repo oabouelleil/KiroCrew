@@ -48,14 +48,19 @@ def mcp_refusal(args: dict) -> str | None:
 
 #: The tools whose ``backend`` argument the preview gates.
 GATED_TOOLS: Final[frozenset[str]] = frozenset({"session_create", "work_dispatch"})
+#: The tools that exist only for the preview, not advertised while it is off.
+PREVIEW_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"session_set_backend"})
 
 
 def with_backend_schema(tools: list[dict], enabled: bool) -> list[dict]:
-    """*tools* unchanged when *enabled*, else with ``backend`` dropped from the gated schemas."""
+    """*tools* unchanged when *enabled*, else without the preview-only tools and with
+    ``backend`` dropped from the gated schemas."""
     if enabled:
         return tools
     out = []
     for tool in tools:
+        if tool.get("name") in PREVIEW_ONLY_TOOLS:
+            continue
         props = (tool.get("inputSchema") or {}).get("properties") or {}
         if tool.get("name") in GATED_TOOLS and "backend" in props:
             schema = dict(tool["inputSchema"])

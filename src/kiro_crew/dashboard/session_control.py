@@ -73,6 +73,7 @@ _OWNERS = (
     "kiro_crew.dashboard.session_control_parts.target_authorization",
     "kiro_crew.dashboard.session_control_parts.turn_control",
     "kiro_crew.dashboard.session_control_parts.model_switch",
+    "kiro_crew.dashboard.session_control_parts.harness_switch",
     "kiro_crew.dashboard.session_control_parts.session_titles",
     "kiro_crew.dashboard.session_control_parts.session_messaging",
     "kiro_crew.dashboard.session_control_parts.crew_filing",
@@ -251,6 +252,10 @@ if TYPE_CHECKING:  # every owner-defined name this module forwards, for type che
         send_origin_meta,
         send_origin_slot,
         send_origin_tab,
+    )
+    from kiro_crew.dashboard.session_control_parts.harness_switch import (  # noqa: F401
+        _still_reachable,
+        set_backend_target,
     )
     from kiro_crew.dashboard.session_control_parts.model_switch import (  # noqa: F401
         _CHANNEL_PICK_LANDINGS,
