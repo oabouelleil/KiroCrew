@@ -11702,6 +11702,11 @@
       "staged": "Inserito nella casella di chat. Invialo da lì.",
       "start": "Inizia",
       "who": "Chi partecipa"
+    },
+    "sessionHarnessPicker": {
+      "busy": "Attendi la fine della risposta, o interrompila, per cambiare harness.",
+      "hint": "Sposta questa chat su un altro harness dell’agente. La conversazione finora gli viene ripassata con il tuo prossimo messaggio.",
+      "label": "Harness"
     }
   },
   "hooks": {

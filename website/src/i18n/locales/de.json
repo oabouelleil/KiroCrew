@@ -11444,6 +11444,11 @@
       "staged": "Ins Chatfeld gelegt. Von dort senden.",
       "start": "Starten",
       "who": "Wer spricht"
+    },
+    "sessionHarnessPicker": {
+      "busy": "Warten Sie, bis die Antwort fertig ist, oder stoppen Sie sie, um den Harness zu wechseln.",
+      "hint": "Verschiebt diesen Chat auf einen anderen Agent-Harness. Der bisherige Verlauf wird ihm mit Ihrer nächsten Nachricht erneut übergeben.",
+      "label": "Harness"
     }
   },
   "hooks": {

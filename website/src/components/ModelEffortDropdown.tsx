@@ -7,6 +7,7 @@ import ModelDropdownList, { type ModelItem } from './ModelDropdownList'
 import ReasoningEffortDropdown from './ReasoningEffortDropdown'
 import EffortOffOnAutoNote from './EffortOffOnAutoNote'
 import SessionSwitchToggle from './SessionSwitchToggle'
+import SessionHarnessPicker from './SessionHarnessPicker'
 import { routeModelPickerKeys } from './modelPickerKeyRouting'
 
 import { useImeGuard } from '../hooks/useImeGuard'
@@ -107,6 +108,9 @@ interface Props {
   /** True when that agent already pins the active model, so the row reports the
    *  state instead of offering a no-op write. */
   pinnedToAgent?: boolean
+  /** Offer the harness row (`SessionHarnessPicker`) for this gateway's slot. Omit
+   *  where the slot is not this gateway's to move (a crew window's peer slot). */
+  harnessSwitch?: { busy: boolean }
 }
 
 const WIDTH = 340
@@ -118,7 +122,7 @@ export default function ModelEffortDropdown({
   defaultEffort = '', effortLevelsOverride, onPinToAgent, agentName = '', pinModelName = '',
   pinModelUnavailable = false, pinnedToAgent = false, modelsLoading = false,
   modelsFailed = false, modelsFailedMessage, onRetryModels, retryingModels = false,
-  writeEffort, onWriteError, ultracode, fastMode, fastUnavailable,
+  writeEffort, onWriteError, ultracode, fastMode, fastUnavailable, harnessSwitch,
 }: Props) {
   const ime = useImeGuard()
   const [attachList, listEdges, remeasureList] = useScrollEdgesY<HTMLDivElement>()
@@ -215,6 +219,7 @@ export default function ModelEffortDropdown({
             {!hasEffort && effortOffOnAuto && <EffortOffOnAutoNote />}
             {typeof ultracode === 'boolean' && slot && <SessionSwitchToggle key={`ultracode:${slot}`} slot={slot} option="ultracode" enabled={ultracode} />}
             {typeof fastMode === 'boolean' && slot && <SessionSwitchToggle key={`fast:${slot}`} slot={slot} option="fast" enabled={fastMode} unavailable={fastUnavailable} />}
+            {harnessSwitch && slot && <SessionHarnessPicker key={`harness:${slot}`} slot={slot} busy={harnessSwitch.busy} />}
             {onPinToAgent && agentName && (
               <Btn
                 type="button"
